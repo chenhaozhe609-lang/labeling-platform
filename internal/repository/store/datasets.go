@@ -8,12 +8,12 @@ import (
 
 func (s *Store) GetDataset(ctx context.Context, id int64) (*domain.Dataset, error) {
 	row := s.pool.QueryRow(ctx, `
-		SELECT id, name, source_schema, source_table, source_pk_column,
+		SELECT id, name, source_schema, source_table, source_pk_column, hash_columns,
 		       form_schema, form_schema_version, status, total_rows, created_at
 		FROM datasets WHERE id = $1`, id)
 
 	var d domain.Dataset
-	err := row.Scan(&d.ID, &d.Name, &d.SourceSchema, &d.SourceTable, &d.SourcePKColumn,
+	err := row.Scan(&d.ID, &d.Name, &d.SourceSchema, &d.SourceTable, &d.SourcePKColumn, &d.HashColumns,
 		&d.FormSchema, &d.FormSchemaVersion, &d.Status, &d.TotalRows, &d.CreatedAt)
 	if err != nil {
 		return nil, mapNoRows(err)

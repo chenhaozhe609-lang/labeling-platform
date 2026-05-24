@@ -19,6 +19,13 @@ export async function uploadDataset(name: string, file: File): Promise<DatasetDe
   return data
 }
 
+export async function syncDataset(id: number, file: File): Promise<DatasetDetail> {
+  const fd = new FormData()
+  fd.append('file', file)
+  const { data } = await api.post<DatasetDetail>(`/datasets/${id}/sync`, fd)
+  return data
+}
+
 export async function updateFormSchema(
   id: number,
   formSchema: FormSchema,

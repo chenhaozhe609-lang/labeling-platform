@@ -21,6 +21,7 @@ type Dataset struct {
 	SourceSchema      string          `json:"source_schema"`
 	SourceTable       string          `json:"source_table"`
 	SourcePKColumn    string          `json:"source_pk_column"`
+	HashColumns       []string        `json:"hash_columns"`
 	FormSchema        json.RawMessage `json:"form_schema"`
 	FormSchemaVersion int             `json:"form_schema_version"`
 	Status            DatasetStatus   `json:"status"`

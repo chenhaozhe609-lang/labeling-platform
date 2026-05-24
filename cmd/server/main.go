@@ -152,6 +152,7 @@ func runServer(cfg config.Config) {
 		authed.GET("/datasets", taskH.ListDatasets)
 		authed.GET("/datasets/:id", datasetH.Detail)
 		authed.POST("/datasets", middleware.RequireRole(domain.RoleAdmin), datasetH.Upload)
+		authed.POST("/datasets/:id/sync", middleware.RequireRole(domain.RoleAdmin), datasetH.Sync)
 		authed.PUT("/datasets/:id/form-schema", middleware.RequireRole(domain.RoleAdmin), datasetH.UpdateFormSchema)
 
 		tasks := authed.Group("/tasks")

@@ -70,6 +70,73 @@ func (s *Store) InsertTasksWithHash(ctx context.Context, datasetID, batchID int6
 	return total, nil
 }
 
+// UpdateDatasetSourceSchema 增量同步后切换 source_schema 指向新版本，并更新总行数。
+func (s *Store) UpdateDatasetSourceSchema(ctx context.Context, id int64, schema string, totalRows int) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE datasets SET source_schema=$2, total_rows=$3, updated_at=now() WHERE id=$1`,
+		id, schema, totalRows)
+	return err
+}
+
+// SyncTasks 增量同步（PRD §12）：单事务内对比新版本 (pk,hash) 与现有任务——
+// 新行 INSERT；content_hash 变化的行回 PENDING + round+1 并将其有效 annotation 标 superseded。
+func (s *Store) SyncTasks(ctx context.Context, datasetID, batchID int64, pks, hashes []string) (newCount, updatedCount int, err error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err = tx.Exec(ctx, `CREATE TEMP TABLE incoming (pk text, h text) ON COMMIT DROP`); err != nil {
+		return 0, 0, err
+	}
+	const chunk = 5000
+	for i := 0; i < len(pks); i += chunk {
+		end := min(i+chunk, len(pks))
+		if _, err = tx.Exec(ctx,
+			`INSERT INTO incoming (pk, h) SELECT * FROM unnest($1::text[], $2::text[])`,
+			pks[i:end], hashes[i:end]); err != nil {
+			return 0, 0, err
+		}
+	}
+
+	// 新行
+	tag, err := tx.Exec(ctx, `
+		INSERT INTO tasks (dataset_id, source_row_pk, content_hash, status, import_batch_id)
+		SELECT $1, i.pk, i.h, 'PENDING', $2
+		FROM incoming i
+		WHERE NOT EXISTS (SELECT 1 FROM tasks t WHERE t.dataset_id=$1 AND t.source_row_pk=i.pk)`,
+		datasetID, batchID)
+	if err != nil {
+		return 0, 0, err
+	}
+	newCount = int(tag.RowsAffected())
+
+	// 改动行：回 PENDING + round+1，旧 annotation superseded（同一语句内多个数据修改 CTE）
+	err = tx.QueryRow(ctx, `
+		WITH changed AS (
+			UPDATE tasks t
+			SET status='PENDING', content_hash=i.h, assigned_to=NULL, claimed_at=NULL,
+			    lease_expires_at=NULL, round=t.round+1, updated_at=now()
+			FROM incoming i
+			WHERE t.dataset_id=$1 AND t.source_row_pk=i.pk AND t.content_hash IS DISTINCT FROM i.h
+			RETURNING t.id
+		), sup AS (
+			UPDATE annotations SET superseded_at=now()
+			WHERE task_id IN (SELECT id FROM changed) AND superseded_at IS NULL
+			RETURNING 1
+		)
+		SELECT count(*) FROM changed`, datasetID).Scan(&updatedCount)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	if err = tx.Commit(ctx); err != nil {
+		return 0, 0, err
+	}
+	return newCount, updatedCount, nil
+}
+
 func (s *Store) GetDatasetProgress(ctx context.Context, id int64) (pending, claimed, completed int, err error) {
 	err = s.pool.QueryRow(ctx, `
 		SELECT

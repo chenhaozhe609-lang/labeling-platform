@@ -1,16 +1,31 @@
-import { useQuery } from '@tanstack/react-query'
+import { useRef } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, PenLine, Settings2 } from 'lucide-react'
-import { getDatasetDetail } from '@/api/datasets'
+import { toast } from 'sonner'
+import { ArrowLeft, Loader2, PenLine, RefreshCw, Settings2 } from 'lucide-react'
+import { getDatasetDetail, syncDataset } from '@/api/datasets'
 import { useAuth } from '@/stores/auth'
 
 export function DatasetDetailPage() {
   const { id } = useParams<{ id: string }>()
   const dsId = Number(id)
   const isAdmin = useAuth((s) => s.user?.role === 'admin')
+  const qc = useQueryClient()
+  const fileRef = useRef<HTMLInputElement>(null)
   const { data, isLoading, error } = useQuery({
     queryKey: ['dataset', dsId],
     queryFn: () => getDatasetDetail(dsId),
+  })
+
+  const sync = useMutation({
+    mutationFn: (file: File) => syncDataset(dsId, file),
+    onSuccess: (d) => {
+      qc.invalidateQueries({ queryKey: ['dataset', dsId] })
+      qc.invalidateQueries({ queryKey: ['datasets'] })
+      const b = d.batches[0]
+      toast.success(`同步完成 · 新增 ${b?.new_task_count ?? 0} · 重标 ${b?.updated_task_count ?? 0}`)
+    },
+    onError: () => toast.error('同步失败'),
   })
 
   if (isLoading) return <Pad>加载中…</Pad>
@@ -38,10 +53,27 @@ export function DatasetDetailPage() {
         </div>
         <div className="flex shrink-0 gap-2">
           {isAdmin && (
-            <Link to={`/datasets/${dsId}/schema`} className="btn-ghost">
-              <Settings2 className="size-3.5" />
-              编辑字段
-            </Link>
+            <>
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".sql,.backup,.dump"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0]
+                  if (f) sync.mutate(f)
+                  e.target.value = ''
+                }}
+              />
+              <button onClick={() => fileRef.current?.click()} disabled={sync.isPending} className="btn-ghost">
+                {sync.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
+                同步新版本
+              </button>
+              <Link to={`/datasets/${dsId}/schema`} className="btn-ghost">
+                <Settings2 className="size-3.5" />
+                编辑字段
+              </Link>
+            </>
           )}
           <Link to={`/workspace?dataset=${dsId}`} className="btn-primary">
             <PenLine className="size-3.5" />
