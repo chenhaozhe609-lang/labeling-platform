@@ -1,0 +1,42 @@
+# ---- 数据 dump（PRD §20.7：绝不入库）----
+*.sql
+*.sql.backup
+*.backup
+*.dump
+/uploads/
+/tmp/
+
+# ---- 依赖 / 构建产物 ----
+node_modules/
+dist/
+build/
+*.log
+coverage/
+
+# ---- Go（后端，后续）----
+/bin/
+*.exe
+*.test
+*.out
+vendor/
+
+# ---- 环境与密钥 ----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ---- 编辑器 / 系统 ----
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.local
+
+# ---- 前端缓存 ----
+web/node_modules/
+web/dist/
+web/.vite/
+.eslintcache
