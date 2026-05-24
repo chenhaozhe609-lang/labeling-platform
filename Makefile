@@ -26,6 +26,10 @@ lint:
 test:
 	go test ./...
 
+# 集成测试（需 Docker；testcontainers 起临时 postgres）
+test-integration:
+	go test -tags=integration -race -timeout 300s ./tests/integration/...
+
 # ---- 前端 ----
 fe-dev:
 	cd web && npm run dev
