@@ -21,8 +21,8 @@ type Config struct {
 func Load() (Config, error) {
 	cfg := Config{
 		Env:         env("ENV", "dev"),
-		HTTPAddr:    env("HTTP_ADDR", ":8080"),
-		DatabaseURL: env("DATABASE_URL", "postgres://labeling:labeling@localhost:5432/labeling_meta?sslmode=disable"),
+		HTTPAddr:    env("HTTP_ADDR", ":8090"),
+		DatabaseURL: env("DATABASE_URL", "postgres://labeling:labeling@localhost:5442/labeling_meta?sslmode=disable"),
 		JWTSecret:   env("JWT_SECRET", ""),
 		AccessTTL:   envDuration("JWT_ACCESS_TTL", 15*time.Minute),
 		RefreshTTL:  envDuration("JWT_REFRESH_TTL", 7*24*time.Hour),
