@@ -4,6 +4,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 )
@@ -18,6 +19,17 @@ type Config struct {
 	RefreshTTL        time.Duration
 	CORSOrigin        string // 开发期允许的前端源
 	LeaseMinutes      int    // 任务租约时长（分钟）
+
+	// 沙箱恢复（C2）
+	SourceAdminURL   string        // postgres 超级用户连 source-db（建 schema / 反射 / 授权 / 读取）
+	SandboxMode      string        // docker | local：psql/pg_restore 的调用方式
+	SandboxContainer string        // docker 模式下的容器名
+	SandboxDB        string        // 目标库（sandbox_template）
+	SandboxUser      string        // 恢复用角色（dev: postgres）
+	SandboxPassword  string        // 对应密码
+	RestoreTimeout   time.Duration // 单次恢复超时
+	UploadMaxBytes   int64         // 上传大小硬上限
+	UploadDir        string        // 上传临时目录
 }
 
 // Load 读取环境变量，缺失则用默认值。生产环境（ENV=prod）下 JWT_SECRET 必填。
@@ -32,6 +44,16 @@ func Load() (Config, error) {
 		RefreshTTL:        envDuration("JWT_REFRESH_TTL", 7*24*time.Hour),
 		CORSOrigin:        env("CORS_ORIGIN", "http://localhost:5173"),
 		LeaseMinutes:      envInt("LEASE_MINUTES", 30),
+
+		SourceAdminURL:   env("SOURCE_ADMIN_URL", "postgres://postgres:postgres@localhost:5433/sandbox_template?sslmode=disable"),
+		SandboxMode:      env("SANDBOX_MODE", "docker"),
+		SandboxContainer: env("SANDBOX_CONTAINER", "labeling-source-db"),
+		SandboxDB:        env("SANDBOX_DB", "sandbox_template"),
+		SandboxUser:      env("SANDBOX_USER", "postgres"),
+		SandboxPassword:  env("SANDBOX_PASSWORD", "postgres"),
+		RestoreTimeout:   envDuration("RESTORE_TIMEOUT", 10*time.Minute),
+		UploadMaxBytes:   int64(envInt("UPLOAD_MAX_MB", 500)) << 20,
+		UploadDir:        env("UPLOAD_DIR", filepath.Join(os.TempDir(), "labeling-uploads")),
 	}
 
 	if cfg.JWTSecret == "" {

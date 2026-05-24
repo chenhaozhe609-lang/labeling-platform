@@ -28,6 +28,18 @@ type Dataset struct {
 	CreatedAt         time.Time       `json:"created_at"`
 }
 
+// ImportBatch 一次 dump 上传记录（审计单位）。
+type ImportBatch struct {
+	ID               int64     `json:"id"`
+	DatasetID        int64     `json:"dataset_id"`
+	FileName         *string   `json:"file_name,omitempty"`
+	FileSizeBytes    *int64    `json:"file_size_bytes,omitempty"`
+	NewTaskCount     int       `json:"new_task_count"`
+	UpdatedTaskCount int       `json:"updated_task_count"`
+	Error            *string   `json:"error,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+}
+
 // DatasetListItem 是列表/看板用的轻量投影（含进度计数）。
 type DatasetListItem struct {
 	ID                int64         `json:"id"`

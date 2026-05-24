@@ -29,6 +29,7 @@ import (
 	"github.com/chenhaozhe609-lang/labeling-platform/internal/middleware"
 	"github.com/chenhaozhe609-lang/labeling-platform/internal/platform/db"
 	jwtpkg "github.com/chenhaozhe609-lang/labeling-platform/internal/platform/jwt"
+	"github.com/chenhaozhe609-lang/labeling-platform/internal/platform/pgrestore"
 	"github.com/chenhaozhe609-lang/labeling-platform/internal/repository/source"
 	"github.com/chenhaozhe609-lang/labeling-platform/internal/repository/store"
 )
@@ -106,11 +107,22 @@ func runServer(cfg config.Config) {
 	}
 	defer sourcePool.Close()
 
+	srcAdminPool, err := db.NewPool(ctx, cfg.SourceAdminURL)
+	if err != nil {
+		fatal("连接 source-db(admin) 失败", err)
+	}
+	defer srcAdminPool.Close()
+
 	st := store.New(metaPool)
 	src := source.New(sourcePool)
 	jm := jwtpkg.NewManager(cfg.JWTSecret, cfg.AccessTTL, cfg.RefreshTTL)
+	restorer := pgrestore.New(pgrestore.Config{
+		Mode: cfg.SandboxMode, Container: cfg.SandboxContainer, DB: cfg.SandboxDB,
+		User: cfg.SandboxUser, Password: cfg.SandboxPassword, Timeout: cfg.RestoreTimeout,
+	})
 	authH := handler.NewAuthHandler(st, jm)
 	taskH := handler.NewTaskHandler(st, src, cfg.LeaseMinutes)
+	datasetH := handler.NewDatasetHandler(st, srcAdminPool, restorer, cfg.UploadDir, cfg.UploadMaxBytes, "labeling_reader")
 
 	rootCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -122,6 +134,7 @@ func runServer(cfg config.Config) {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	r := gin.New()
+	r.MaxMultipartMemory = 16 << 20 // 16MB 内存上限，更大转临时盘
 	r.Use(middleware.Recover(), middleware.Logger(), middleware.CORS(cfg.CORSOrigin))
 	r.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 
@@ -135,7 +148,11 @@ func runServer(cfg config.Config) {
 		authed := api.Group("")
 		authed.Use(middleware.RequireAuth(jm))
 		authed.GET("/me", authH.Me)
+
 		authed.GET("/datasets", taskH.ListDatasets)
+		authed.GET("/datasets/:id", datasetH.Detail)
+		authed.POST("/datasets", middleware.RequireRole(domain.RoleAdmin), datasetH.Upload)
+		authed.PUT("/datasets/:id/form-schema", middleware.RequireRole(domain.RoleAdmin), datasetH.UpdateFormSchema)
 
 		tasks := authed.Group("/tasks")
 		tasks.POST("/claim", taskH.Claim)
