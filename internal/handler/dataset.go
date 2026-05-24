@@ -247,10 +247,20 @@ func (h *DatasetHandler) runSync(ctx context.Context, ds *domain.Dataset, batchI
 	if err := h.restorer.Restore(ctx, newSchema, dumpPath, custom); err != nil {
 		return err
 	}
-	// 用数据集存储的 hash_columns/pk/table，保证哈希与上一版可比（PRD §12.2）
-	rows, err := service.FetchHashedRows(ctx, h.srcAdmin, newSchema, ds.SourceTable, ds.SourcePKColumn, ds.HashColumns)
+	// v2：同步只针对「任务行」（有空 fill 列）——与 generate-tasks 规则一致，
+	// 避免把 fill 已填满、本不该进池的行也当成任务（PRD §24 任务规则）。
+	fs, err := domain.ParseFormSchema(ds.FormSchema)
 	if err != nil {
-		return fmt.Errorf("计算 content_hash: %w", err)
+		return fmt.Errorf("form_schema 解析: %w", err)
+	}
+	fillCols := fs.FillColumns()
+	if len(fillCols) == 0 {
+		return fmt.Errorf("数据集尚未配置补全列，无法同步")
+	}
+	// 用数据集存储的 hash_columns/pk/table，保证哈希与上一版可比（PRD §12.2）
+	rows, err := service.FetchTaskRows(ctx, h.srcAdmin, newSchema, ds.SourceTable, ds.SourcePKColumn, ds.HashColumns, fillCols)
+	if err != nil {
+		return fmt.Errorf("扫描待补全行: %w", err)
 	}
 	if err := service.GrantReader(ctx, h.srcAdmin, newSchema, h.readerRole); err != nil {
 		return fmt.Errorf("授权 reader: %w", err)
