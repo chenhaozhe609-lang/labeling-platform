@@ -1,8 +1,9 @@
 # ---- 规划文档（本地保留，不入库）----
 /planning/
 
-# ---- 数据 dump（PRD §20.7：绝不入库）----
-*.sql
+# ---- 用户上传的数据 dump（PRD §20.7：绝不入库）----
+# 注意：不要用 *.sql 一刀切，否则会误伤 migrations/ 与 source-init/ 等正当 SQL。
+# dump 一律落在 uploads/ 或 tmp/，并按扩展名忽略 backup/dump。
 *.sql.backup
 *.backup
 *.dump
