@@ -62,7 +62,7 @@ func runSeed(cfg config.Config) {
 var sourceSeedStmts = []string{
 	`CREATE SCHEMA IF NOT EXISTS ds_demo`,
 	`DROP TABLE IF EXISTS ds_demo.majors`,
-	`CREATE TABLE ds_demo.majors (id INT PRIMARY KEY, title TEXT, body TEXT, category TEXT)`,
+	`CREATE TABLE ds_demo.majors (id INT PRIMARY KEY, title TEXT, body TEXT, category TEXT, discipline VARCHAR(16), difficulty SMALLINT)`,
 	`INSERT INTO ds_demo.majors (id, title, body, category) VALUES
 	 (1, '计算机科学与技术', '本专业培养具备扎实的数学与计算机科学理论基础，系统掌握计算机硬件、软件与网络技术，能够在科研院所、企事业单位从事计算机教学、科学研究与应用开发的高级专门人才。主干课程包括数据结构、操作系统、计算机组成原理、编译原理、计算机网络、数据库系统与人工智能导论等。', '工学'),
 	 (2, '哲学', '哲学专业旨在培养具有较高理论素养与思辨能力、系统掌握中外哲学史与哲学基本原理的研究型人才。课程涵盖马克思主义哲学、中国哲学史、西方哲学史、伦理学、逻辑学与科学技术哲学等，注重经典文本的精读与批判性思维训练。', '哲学'),
@@ -72,25 +72,24 @@ var sourceSeedStmts = []string{
 	`GRANT SELECT ON ALL TABLES IN SCHEMA ds_demo TO labeling_reader`,
 }
 
+// v2 列角色 form_schema（PRD §24）：title/body/category 作上下文（兼 LLM 预填依据），
+// discipline/difficulty 作补全列（源表中为 NULL → 整表都是待补全任务）。
 const demoFormSchema = `{
-  "version": 3,
-  "source_fields": [
-    { "code": "id", "type": "int", "widget": "Input", "label": "ID" },
-    { "code": "title", "type": "text", "widget": "Input", "label": "专业名称", "primary": true },
-    { "code": "body", "type": "text", "widget": "TextArea", "label": "专业介绍", "primary": true },
-    { "code": "category", "type": "text", "widget": "Input", "label": "原学科门类" }
-  ],
-  "annotation_fields": [
-    { "code": "discipline", "label": "学科归类", "widget": "Select", "required": true, "group": "core",
-      "options": [
-        { "value": "theory", "label": "理论型" },
-        { "value": "engineering", "label": "工程型" },
-        { "value": "interdisciplinary", "label": "交叉型" },
-        { "value": "applied", "label": "应用型" }
-      ],
-      "hotkeys": { "Q": "theory", "W": "engineering", "E": "interdisciplinary", "R": "applied" } },
-    { "code": "difficulty", "label": "学习难度", "widget": "Rating", "required": true, "min": 1, "max": 5, "group": "core" },
-    { "code": "confidence", "label": "标注置信度", "widget": "Confidence", "min": 0, "max": 1, "step": 0.1, "default": 0.7, "group": "core" },
-    { "code": "note", "label": "备注", "widget": "TextArea", "max_length": 500, "group": "extra" }
+  "version": 1,
+  "primary_cols": ["title"],
+  "columns": [
+    { "code": "id", "type": "integer", "role": "id", "label": "ID", "pk": true },
+    { "code": "title", "type": "text", "role": "context", "label": "专业名称" },
+    { "code": "body", "type": "text", "role": "context", "label": "专业介绍" },
+    { "code": "category", "type": "text", "role": "context", "label": "学科门类" },
+    { "code": "discipline", "type": "varchar(16)", "role": "fill", "label": "学科归类",
+      "field": { "kind": "single", "options": [
+        { "value": "theory", "label": "理论型", "key": "Q" },
+        { "value": "engineering", "label": "工程型", "key": "W" },
+        { "value": "interdisciplinary", "label": "交叉型", "key": "E" },
+        { "value": "applied", "label": "应用型", "key": "R" }
+      ] } },
+    { "code": "difficulty", "type": "smallint", "role": "fill", "label": "学习难度",
+      "field": { "kind": "number", "min": 1, "max": 5 } }
   ]
 }`

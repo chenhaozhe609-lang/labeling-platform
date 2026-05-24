@@ -117,24 +117,64 @@ func (h *DatasetHandler) runImport(ctx context.Context, dsID, batchID int64, sch
 		return fmt.Errorf("授权 reader: %w", err)
 	}
 
-	rows, err := service.FetchHashedRows(ctx, h.srcAdmin, schema, table, ref.PKColumn, ref.HashColumns)
+	// v2：导入只反射 + 置 READY；任务在 admin 配置完「补全列」后由 GenerateTasks 生成（PRD §24.7）。
+	if err := h.store.UpdateDatasetReflected(ctx, dsID, schema, table, ref.PKColumn, ref.HashColumns, ref.FormSchema, ref.TotalRows); err != nil {
+		return err
+	}
+	return h.store.FinishImportBatch(ctx, batchID, 0, 0, "")
+}
+
+// GenerateTasks 按当前 form_schema 的 fill 列，把「有空 fill 列」的源行物化为任务（PRD §24.7）。
+func (h *DatasetHandler) GenerateTasks(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		return fmt.Errorf("计算 content_hash: %w", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "非法 id"})
+		return
+	}
+	ctx := c.Request.Context()
+	ds, err := h.store.GetDataset(ctx, id)
+	if errors.Is(err, store.ErrNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "数据集不存在"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询失败"})
+		return
+	}
+	fs, err := domain.ParseFormSchema(ds.FormSchema)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "form_schema 解析失败"})
+		return
+	}
+	fillCols := fs.FillColumns()
+	if len(fillCols) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请先在「列与字段」配置至少一个补全列"})
+		return
+	}
+
+	rows, err := service.FetchTaskRows(ctx, h.srcAdmin, ds.SourceSchema, ds.SourceTable, ds.SourcePKColumn, ds.HashColumns, fillCols)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "扫描待补全行失败: " + err.Error()})
+		return
+	}
+	batchID, err := h.store.CreateImportBatch(ctx, id, "(generate-tasks)", 0)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建批次失败"})
+		return
 	}
 	pks := make([]string, len(rows))
 	hs := make([]string, len(rows))
 	for i, r := range rows {
 		pks[i], hs[i] = r.PK, r.Hash
 	}
-	n, err := h.store.InsertTasksWithHash(ctx, dsID, batchID, pks, hs)
+	n, err := h.store.InsertTasksWithHash(ctx, id, batchID, pks, hs)
 	if err != nil {
-		return fmt.Errorf("生成任务: %w", err)
+		_ = h.store.FinishImportBatch(ctx, batchID, 0, 0, err.Error())
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "生成任务失败"})
+		return
 	}
-
-	if err := h.store.UpdateDatasetReflected(ctx, dsID, schema, table, ref.PKColumn, ref.HashColumns, ref.FormSchema, ref.TotalRows); err != nil {
-		return err
-	}
-	return h.store.FinishImportBatch(ctx, batchID, int(n), 0, "")
+	_ = h.store.FinishImportBatch(ctx, batchID, int(n), 0, "")
+	h.respondDetail(c, id)
 }
 
 // Sync 对已有数据集重传新版本 dump：仅新增 + content_hash 差异重标（PRD §12）。

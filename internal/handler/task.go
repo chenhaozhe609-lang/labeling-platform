@@ -14,16 +14,18 @@ import (
 	"github.com/chenhaozhe609-lang/labeling-platform/internal/middleware"
 	"github.com/chenhaozhe609-lang/labeling-platform/internal/repository/source"
 	"github.com/chenhaozhe609-lang/labeling-platform/internal/repository/store"
+	"github.com/chenhaozhe609-lang/labeling-platform/internal/service"
 )
 
 type TaskHandler struct {
-	store    *store.Store
-	source   *source.Reader
-	leaseMin int
+	store     *store.Store
+	source    *source.Reader
+	prefiller service.Prefiller
+	leaseMin  int
 }
 
-func NewTaskHandler(s *store.Store, src *source.Reader, leaseMin int) *TaskHandler {
-	return &TaskHandler{store: s, source: src, leaseMin: leaseMin}
+func NewTaskHandler(s *store.Store, src *source.Reader, pf service.Prefiller, leaseMin int) *TaskHandler {
+	return &TaskHandler{store: s, source: src, prefiller: pf, leaseMin: leaseMin}
 }
 
 func userID(c *gin.Context) int64 {
@@ -44,7 +46,16 @@ func (h *TaskHandler) bundle(ctx context.Context, t *domain.Task) (gin.H, error)
 	} else if row != nil {
 		srcRow = row
 	}
-	return gin.H{"task": t, "source_row": srcRow, "form_schema": json.RawMessage(ds.FormSchema)}, nil
+
+	out := gin.H{"task": t, "source_row": srcRow, "form_schema": json.RawMessage(ds.FormSchema)}
+
+	// LLM 预填：context 列 → 预测 fill 列（PRD §24.5）。失败不阻断。
+	if fs, err := domain.ParseFormSchema(ds.FormSchema); err == nil && h.prefiller != nil {
+		if fills, err := h.prefiller.Prefill(ctx, fs, srcRow); err == nil && len(fills) > 0 {
+			out["ai_suggestion"] = gin.H{"fills": fills, "_source": "ai"}
+		}
+	}
+	return out, nil
 }
 
 // Claim 抢一个 PENDING 任务，直接返回完整 bundle；池空返回 {"task": null}。
@@ -122,6 +133,10 @@ func (h *TaskHandler) Submit(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "data 必填"})
 		return
 	}
+	if msg := h.validateFills(c.Request.Context(), id, req.Data); msg != "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+		return
+	}
 	err := h.store.SubmitAnnotation(c.Request.Context(), id, userID(c), req.Data, req.FormSchemaVersion)
 	if errors.Is(err, store.ErrConflict) {
 		c.JSON(http.StatusConflict, gin.H{"error": "任务已超时或被回收，请重新领取"})
@@ -132,6 +147,47 @@ func (h *TaskHandler) Submit(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+// validateFills 校验提交的 data.fills 覆盖了所有 fill 列且非空；返回错误文案（""=通过）。
+func (h *TaskHandler) validateFills(ctx context.Context, taskID int64, data json.RawMessage) string {
+	var payload struct {
+		Fills map[string]any `json:"fills"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return "data.fills 格式错误"
+	}
+	t, err := h.store.GetTask(ctx, taskID)
+	if err != nil {
+		return "" // 任务查不到：交给后续幂等校验处理
+	}
+	ds, err := h.store.GetDataset(ctx, t.DatasetID)
+	if err != nil {
+		return ""
+	}
+	fs, err := domain.ParseFormSchema(ds.FormSchema)
+	if err != nil {
+		return ""
+	}
+	for _, code := range fs.FillColumns() {
+		if isEmptyVal(payload.Fills[code]) {
+			return "请补全所有「补全列」后再提交"
+		}
+	}
+	return ""
+}
+
+func isEmptyVal(v any) bool {
+	switch x := v.(type) {
+	case nil:
+		return true
+	case string:
+		return x == ""
+	case []any:
+		return len(x) == 0
+	default:
+		return false
+	}
 }
 
 func (h *TaskHandler) Release(c *gin.Context) {

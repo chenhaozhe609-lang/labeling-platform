@@ -32,6 +32,7 @@ import (
 	"github.com/chenhaozhe609-lang/labeling-platform/internal/platform/pgrestore"
 	"github.com/chenhaozhe609-lang/labeling-platform/internal/repository/source"
 	"github.com/chenhaozhe609-lang/labeling-platform/internal/repository/store"
+	"github.com/chenhaozhe609-lang/labeling-platform/internal/service"
 )
 
 const migrationsSource = "file://migrations"
@@ -121,7 +122,7 @@ func runServer(cfg config.Config) {
 		User: cfg.SandboxUser, Password: cfg.SandboxPassword, Timeout: cfg.RestoreTimeout,
 	})
 	authH := handler.NewAuthHandler(st, jm)
-	taskH := handler.NewTaskHandler(st, src, cfg.LeaseMinutes)
+	taskH := handler.NewTaskHandler(st, src, service.StubPrefiller{}, cfg.LeaseMinutes)
 	datasetH := handler.NewDatasetHandler(st, srcAdminPool, restorer, cfg.UploadDir, cfg.UploadMaxBytes, "labeling_reader")
 
 	rootCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -153,6 +154,7 @@ func runServer(cfg config.Config) {
 		authed.GET("/datasets/:id", datasetH.Detail)
 		authed.POST("/datasets", middleware.RequireRole(domain.RoleAdmin), datasetH.Upload)
 		authed.POST("/datasets/:id/sync", middleware.RequireRole(domain.RoleAdmin), datasetH.Sync)
+		authed.POST("/datasets/:id/generate-tasks", middleware.RequireRole(domain.RoleAdmin), datasetH.GenerateTasks)
 		authed.PUT("/datasets/:id/form-schema", middleware.RequireRole(domain.RoleAdmin), datasetH.UpdateFormSchema)
 
 		tasks := authed.Group("/tasks")
