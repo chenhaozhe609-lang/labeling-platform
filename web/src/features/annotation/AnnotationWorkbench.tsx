@@ -5,26 +5,23 @@ import { CornerDownLeft, Loader2, LogOut, PartyPopper, RefreshCw, SkipForward } 
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Kbd } from '@/components/Kbd'
-import type { AnnotationData, AnnotationField, DatasetListItem, TaskBundle } from '@/types'
+import type { ColumnSpec, DatasetListItem, TaskBundle } from '@/types'
 import { claimTask, heartbeat, listDatasets, releaseTask, submitTask } from '@/api/tasks'
 import { clearDraft, loadDraft, useAutosave } from '@/hooks/useDraft'
 import { useLeaseTimer } from '@/hooks/useLeaseTimer'
 import { useHeartbeat } from '@/hooks/useHeartbeat'
 import { SchemaForm } from './SchemaForm'
-import { ContextPane, ReadingPane } from './panes'
+import { ContextPane, ReadingPane, type ReadingField } from './panes'
 import { AutosaveIndicator, LeaseTimer, ShortcutHintBar } from './statusbar'
 
 export type FocusContext = 'reading' | 'widget' | 'field'
 
 type Phase = 'loading' | 'ready' | 'empty' | 'nodataset'
+type Values = Record<string, unknown>
 
-const isEmpty = (v: unknown) => v === undefined || v === null || v === ''
-
-function defaultsFor(fields: AnnotationField[]): AnnotationData {
-  const v: AnnotationData = {}
-  for (const f of fields) if (f.default !== undefined) v[f.code] = f.default
-  return v
-}
+const isEmpty = (v: unknown) =>
+  v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0)
+const eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 
 export function AnnotationWorkbench() {
   const [phase, setPhase] = useState<Phase>('loading')
@@ -33,7 +30,7 @@ export function AnnotationWorkbench() {
   const [leaseExpiresAt, setLeaseExpiresAt] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
-  const [values, setValues] = useState<AnnotationData>({})
+  const [values, setValues] = useState<Values>({})
   const [activeFieldCode, setActiveFieldCode] = useState<string | null>(null)
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [errors, setErrors] = useState<Record<string, boolean>>({})
@@ -45,14 +42,19 @@ export function AnnotationWorkbench() {
   const readingRef = useRef<HTMLDivElement | null>(null)
 
   const task = bundle?.task ?? null
-  const fields = bundle?.form_schema.annotation_fields ?? []
+  const columns = bundle?.form_schema.columns ?? []
+  const fillCols = columns.filter((c) => c.role === 'fill')
+  const aiFills = bundle?.ai_suggestion?.fills
+  const primarySet = new Set(bundle?.form_schema.primary_cols ?? [])
+  const contextFields: ReadingField[] = columns
+    .filter((c) => c.role === 'context')
+    .map((c) => ({ code: c.code, label: c.label || c.code, primary: primarySet.has(c.code) }))
 
   const lease = useLeaseTimer(leaseExpiresAt)
   const saveState = useAutosave(task?.id ?? 0, values, dirty)
   const displaySave = restored && !dirty ? 'restored' : saveState
   useHeartbeat(phase === 'ready' ? (task?.id ?? null) : null, phase === 'ready', setLeaseExpiresAt)
 
-  // 首次：取数据集 → 领第一条
   useEffect(() => {
     void (async () => {
       try {
@@ -60,6 +62,7 @@ export function AnnotationWorkbench() {
         const want = searchParams.get('dataset')
         const ds =
           (want ? list.find((d) => String(d.id) === want) : undefined) ??
+          list.find((d) => d.status === 'READY' && d.pending > 0) ??
           list.find((d) => d.status === 'READY') ??
           list[0]
         if (!ds) {
@@ -75,13 +78,13 @@ export function AnnotationWorkbench() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // 切到新任务：恢复草稿 / 套默认值 / 复位
+  // 切到新任务：草稿 > AI 预填 > 空
   useEffect(() => {
     if (!bundle) return
-    const flds = bundle.form_schema.annotation_fields
     const draft = loadDraft(bundle.task.id)
-    setValues(draft ?? defaultsFor(flds))
-    setActiveFieldCode(flds[0]?.code ?? null)
+    const ai = bundle.ai_suggestion?.fills
+    setValues(draft ?? (ai ? { ...ai } : {}))
+    setActiveFieldCode(bundle.form_schema.columns.find((c) => c.role === 'fill')?.code ?? null)
     setErrors({})
     setDirty(false)
     setRestored(!!draft)
@@ -89,18 +92,13 @@ export function AnnotationWorkbench() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bundle?.task.id])
 
-  // 焦点态跟踪
   useEffect(() => {
     const handler = () => {
       const el = document.activeElement as HTMLElement | null
       const tag = el?.tagName
-      if (tag === 'TEXTAREA' || (tag === 'INPUT' && (el as HTMLInputElement).type === 'text')) {
-        setCtx('field')
-      } else if (el?.closest('[data-fieldwrap]')) {
-        setCtx('widget')
-      } else {
-        setCtx('reading')
-      }
+      if (tag === 'TEXTAREA' || tag === 'INPUT') setCtx('field')
+      else if (el?.closest('[data-fieldwrap]')) setCtx('widget')
+      else setCtx('reading')
     }
     document.addEventListener('focusin', handler)
     return () => document.removeEventListener('focusin', handler)
@@ -135,37 +133,30 @@ export function AnnotationWorkbench() {
     setActiveFieldCode(code)
     requestAnimationFrame(() => {
       const wrap = document.querySelector<HTMLElement>(`[data-fieldwrap="${code}"]`)
-      wrap?.querySelector<HTMLElement>('button, textarea, [role="slider"], input')?.focus()
+      wrap?.querySelector<HTMLElement>('button, textarea, input, [role="slider"]')?.focus()
     })
   }
-
   function focusNext(fromCode: string) {
-    const i = fields.findIndex((f) => f.code === fromCode)
-    const next = fields[i + 1]
+    const i = fillCols.findIndex((f) => f.code === fromCode)
+    const next = fillCols[i + 1]
     if (next) focusField(next.code)
-  }
-
-  function acceptAi() {
-    if (!bundle?.ai_suggestion) return
-    const ai = bundle.ai_suggestion
-    const merged: AnnotationData = { ...values }
-    for (const f of fields) if (ai[f.code] !== undefined) merged[f.code] = ai[f.code]
-    merged._source = 'ai'
-    setValues(merged)
-    setDirty(true)
-    toast.success('已采纳 AI 建议')
   }
 
   function validate(): boolean {
     const missing: Record<string, boolean> = {}
-    for (const f of fields) if (f.required && isEmpty(values[f.code])) missing[f.code] = true
+    for (const f of fillCols) if (isEmpty(values[f.code])) missing[f.code] = true
     if (Object.keys(missing).length) {
       setErrors(missing)
-      toast.error('请先填写必填项')
+      toast.error('请补全所有列后再提交')
       focusField(Object.keys(missing)[0])
       return false
     }
     return true
+  }
+
+  function computeSource(): 'human' | 'ai' | 'ai-edited' {
+    if (!aiFills || Object.keys(aiFills).length === 0) return 'human'
+    return eq(values, aiFills) ? 'ai' : 'ai-edited'
   }
 
   async function submit() {
@@ -178,7 +169,7 @@ export function AnnotationWorkbench() {
     setSubmitting(true)
     const id = bundle.task.id
     try {
-      await submitTask(id, values, bundle.form_schema.version)
+      await submitTask(id, { fills: values, _source: computeSource() }, bundle.form_schema.version)
       clearDraft(id)
       toast.success(`已提交 · #${id}`)
       await claimNext(bundle.task.dataset_id)
@@ -196,7 +187,7 @@ export function AnnotationWorkbench() {
     try {
       await releaseTask(bundle.task.id)
     } catch {
-      /* 幂等：忽略 */
+      /* 幂等 */
     }
     toast(label)
     await claimNext(dsId)
@@ -209,17 +200,15 @@ export function AnnotationWorkbench() {
       setLeaseExpiresAt(r.lease_expires_at)
       toast.success('已延长租约')
     } catch {
-      toast.error('续约失败，任务可能已被回收')
+      toast.error('续约失败')
     }
   }
 
-  // 键盘（三焦点态模型）
   const keyHandler = (e: KeyboardEvent) => {
     if (phase !== 'ready' || !bundle) return
     const el = document.activeElement as HTMLElement | null
     const tag = el?.tagName
-    const isTextInput =
-      tag === 'TEXTAREA' || (tag === 'INPUT' && (el as HTMLInputElement).type === 'text')
+    const inText = tag === 'TEXTAREA' || tag === 'INPUT'
     const mod = e.metaKey || e.ctrlKey
 
     if (mod && e.key === 'Enter') {
@@ -227,12 +216,7 @@ export function AnnotationWorkbench() {
       void submit()
       return
     }
-    if (mod && (e.key === 'a' || e.key === 'A')) {
-      e.preventDefault()
-      acceptAi()
-      return
-    }
-    if (isTextInput) {
+    if (inText) {
       if (e.key === 'Escape') {
         el?.blur()
         setActiveFieldCode(null)
@@ -251,9 +235,7 @@ export function AnnotationWorkbench() {
       if (activeFieldCode) {
         setActiveFieldCode(null)
         el?.blur()
-      } else {
-        void releaseTo('已放回任务池')
-      }
+      } else void releaseTo('已放回任务池')
       return
     }
     if (key === ' ') {
@@ -261,56 +243,36 @@ export function AnnotationWorkbench() {
       setDetailsOpen((o) => !o)
       return
     }
-    if (key === 'j' || key === 'J') {
-      readingRef.current?.scrollBy({ top: 140, behavior: 'smooth' })
-      return
-    }
-    if (key === 'k' || key === 'K') {
-      readingRef.current?.scrollBy({ top: -140, behavior: 'smooth' })
-      return
-    }
-    if (key === 's' || key === 'S' || key === 'ArrowRight') {
-      void releaseTo('已跳过 · 放回任务池')
-      return
-    }
+    if (key === 'j' || key === 'J') return void readingRef.current?.scrollBy({ top: 140, behavior: 'smooth' })
+    if (key === 'k' || key === 'K') return void readingRef.current?.scrollBy({ top: -140, behavior: 'smooth' })
+    if (key === 's' || key === 'S' || key === 'ArrowRight') return void releaseTo('已跳过 · 放回任务池')
 
+    // 数字键：当前 single fill 列按序号选项
     if (/^[1-9]$/.test(key)) {
-      const n = Number(key)
-      const target =
-        fields.find((f) => f.code === activeFieldCode) ??
-        fields.find((f) => f.widget === 'Select' || f.widget === 'Rating')
-      if (!target) return
-      if (target.widget === 'Select') {
-        const opt = target.options?.[n - 1]
-        if (opt) {
-          e.preventDefault()
-          setValue(target.code, opt.value)
-          focusNext(target.code)
-        }
-      } else if (target.widget === 'Rating') {
-        if (n <= (target.max ?? 5)) {
-          e.preventDefault()
-          setValue(target.code, n)
-          focusNext(target.code)
-        }
-      } else if (target.widget === 'Confidence') {
+      const target = activeSingle()
+      const opt = target?.field?.options?.[Number(key) - 1]
+      if (target && opt) {
         e.preventDefault()
-        setValue(target.code, Number((n / 10).toFixed(1)))
+        setValue(target.code, opt.value)
+        focusNext(target.code)
       }
       return
     }
-
+    // 字母快捷键：匹配任一 single fill 列选项的 key
     const K = key.toUpperCase()
-    const activeF = fields.find((f) => f.code === activeFieldCode)
-    if (activeF?.widget === 'Confidence' && (K === 'Q' || K === 'W' || K === 'E')) {
-      setValue(activeF.code, { Q: 0.3, W: 0.6, E: 0.9 }[K])
-      return
+    for (const f of fillCols) {
+      const opt = f.field?.options?.find((o) => o.key?.toUpperCase() === K)
+      if (opt) {
+        setValue(f.code, opt.value)
+        focusNext(f.code)
+        return
+      }
     }
-    const hot = fields.find((f) => f.hotkeys && f.hotkeys[K] !== undefined)
-    if (hot) {
-      setValue(hot.code, hot.hotkeys![K])
-      focusNext(hot.code)
-    }
+  }
+  function activeSingle(): ColumnSpec | undefined {
+    const a = fillCols.find((f) => f.code === activeFieldCode)
+    if (a?.field?.kind === 'single') return a
+    return fillCols.find((f) => f.field?.kind === 'single')
   }
 
   const handlerRef = useRef(keyHandler)
@@ -321,7 +283,6 @@ export function AnnotationWorkbench() {
     return () => window.removeEventListener('keydown', fn)
   }, [])
 
-  // ---- 非就绪态 ----
   if (phase === 'loading') {
     return (
       <div className="flex h-svh items-center justify-center bg-background text-muted-foreground">
@@ -331,9 +292,7 @@ export function AnnotationWorkbench() {
     )
   }
   if (phase === 'nodataset') {
-    return (
-      <CenterCard title="暂无可用数据集" desc="请联系管理员上传数据集后再来标注。" />
-    )
+    return <Center title="暂无可用数据集" desc="请管理员上传数据集、配置补全列并生成任务后再来。" />
   }
   if (phase === 'empty' || !bundle) {
     return (
@@ -341,9 +300,7 @@ export function AnnotationWorkbench() {
         <PartyPopper className="size-10 text-success" />
         <div>
           <div className="text-lg font-semibold">该数据集已全部标完</div>
-          <div className="mt-1 text-sm text-muted-foreground">
-            {dataset?.name} · 共 {dataset?.total_rows ?? 0} 条
-          </div>
+          <div className="mt-1 text-sm text-muted-foreground">{dataset?.name}</div>
         </div>
         {dataset && (
           <Button variant="secondary" size="sm" onClick={() => claimNext(dataset.id)}>
@@ -363,8 +320,7 @@ export function AnnotationWorkbench() {
         <span className="font-mono tabular text-muted-foreground">#{task!.id}</span>
         {task!.round > 1 && (
           <Badge variant="secondary" className="gap-1 font-normal">
-            <RefreshCw className="size-3" />
-            round {task!.round}
+            <RefreshCw className="size-3" />round {task!.round}
           </Badge>
         )}
         <Sep />
@@ -372,71 +328,30 @@ export function AnnotationWorkbench() {
         <div className="ml-auto flex items-center gap-2">
           <AutosaveIndicator state={displaySave} />
           <Button variant="ghost" size="sm" onClick={() => releaseTo('已跳过 · 放回任务池')}>
-            <SkipForward className="size-3.5" />
-            跳过
+            <SkipForward className="size-3.5" />跳过
           </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-destructive hover:text-destructive"
-            onClick={() => releaseTo('已放回任务池')}
-          >
-            <LogOut className="size-3.5" />
-            释放
+          <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={() => releaseTo('已放回任务池')}>
+            <LogOut className="size-3.5" />释放
           </Button>
         </div>
       </header>
 
       <div className="flex min-h-0 flex-1">
         <aside className="w-[280px] shrink-0 border-r border-border">
-          <ContextPane
-            datasetName={dataset?.name ?? ''}
-            pk={task!.source_row_pk}
-            round={task!.round}
-            history={[]}
-          />
+          <ContextPane datasetName={dataset?.name ?? ''} pk={task!.source_row_pk} round={task!.round} history={[]} />
         </aside>
-
-        <main
-          key={task!.id}
-          className="min-w-0 flex-1 border-r border-border duration-200 animate-in fade-in slide-in-from-right-2"
-        >
-          <ReadingPane
-            sourceRow={bundle.source_row}
-            sourceFields={bundle.form_schema.source_fields}
-            detailsOpen={detailsOpen}
-            onToggleDetails={() => setDetailsOpen((o) => !o)}
-            scrollRef={readingRef}
-          />
+        <main key={task!.id} className="min-w-0 flex-1 border-r border-border duration-200 animate-in fade-in slide-in-from-right-2">
+          <ReadingPane sourceRow={bundle.source_row} fields={contextFields} detailsOpen={detailsOpen} onToggleDetails={() => setDetailsOpen((o) => !o)} scrollRef={readingRef} />
         </main>
-
-        <aside
-          key={`form-${task!.id}`}
-          className="flex w-[380px] shrink-0 flex-col overflow-y-auto p-4 duration-200 animate-in fade-in slide-in-from-right-2"
-        >
+        <aside key={`form-${task!.id}`} className="flex w-[380px] shrink-0 flex-col overflow-y-auto p-4 duration-200 animate-in fade-in slide-in-from-right-2">
           <div className="flex-1">
-            <SchemaForm
-              fields={fields}
-              values={values}
-              activeFieldCode={activeFieldCode}
-              errors={errors}
-              aiSuggestion={bundle.ai_suggestion}
-              onChange={setValue}
-              onFieldFocus={setActiveFieldCode}
-              onAcceptAi={acceptAi}
-            />
+            <SchemaForm fields={fillCols} values={values} activeFieldCode={activeFieldCode} errors={errors} aiFills={aiFills} onChange={setValue} onFieldFocus={setActiveFieldCode} />
           </div>
           <div className="sticky bottom-0 mt-4 bg-background pt-2">
-            <Button
-              onClick={submit}
-              disabled={submitting}
-              className="w-full bg-success text-primary-foreground hover:bg-success/90"
-            >
+            <Button onClick={submit} disabled={submitting} className="w-full bg-success text-primary-foreground hover:bg-success/90">
               {submitting ? <Loader2 className="size-4 animate-spin" /> : <CornerDownLeft className="size-4" />}
               提交并下一条
-              <Kbd className="ml-1 border-primary-foreground/20 bg-primary-foreground/10 text-primary-foreground">
-                ↵
-              </Kbd>
+              <Kbd className="ml-1 border-primary-foreground/20 bg-primary-foreground/10 text-primary-foreground">↵</Kbd>
             </Button>
           </div>
         </aside>
@@ -450,8 +365,7 @@ export function AnnotationWorkbench() {
 function Sep() {
   return <span className="text-text-tertiary">·</span>
 }
-
-function CenterCard({ title, desc }: { title: string; desc: string }) {
+function Center({ title, desc }: { title: string; desc: string }) {
   return (
     <div className="flex h-svh flex-col items-center justify-center gap-2 bg-background text-center">
       <div className="text-lg font-semibold">{title}</div>

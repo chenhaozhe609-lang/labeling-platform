@@ -5,18 +5,6 @@ export type DatasetStatus = 'IMPORTING' | 'READY' | 'PAUSED' | 'DONE' | 'FAILED'
 export type TaskStatus = 'PENDING' | 'CLAIMED' | 'COMPLETED' | 'NEEDS_REDO'
 export type ReviewStatus = 'approved' | 'needs_redo'
 
-export type AnnotationWidget =
-  | 'Select'
-  | 'MultiSelect'
-  | 'Rating'
-  | 'Confidence'
-  | 'TextArea'
-  | 'Input'
-  | 'InputNumber'
-  | 'Switch'
-  | 'DatePicker'
-  | 'RelationLink'
-
 export interface User {
   id: number
   username: string
@@ -24,36 +12,37 @@ export interface User {
   created_at: string
 }
 
-// ---- form_schema ----
+// ---- form_schema v2（列角色补全，PRD §24）----
+export type ColumnRole = 'context' | 'fill' | 'hidden' | 'id'
+export type FieldKind = 'text' | 'single' | 'multi' | 'number' | 'bool' | 'date'
+
 export interface FieldOption {
   value: string
   label: string
+  key?: string // 快捷键
 }
-export interface SourceField {
-  code: string
-  type: string
-  widget: string
-  label: string
-  primary?: boolean // 扩展：是否中栏阅读聚光字段
-}
-export interface AnnotationField {
-  code: string
-  label: string
-  widget: AnnotationWidget
-  required?: boolean
+export interface FieldConfig {
+  kind: FieldKind
   options?: FieldOption[]
+  regex?: string
+  placeholder?: string
+  hint?: string
   min?: number
   max?: number
   step?: number
-  max_length?: number
-  default?: unknown
-  group?: 'core' | 'extra' // 扩展：卡片分组
-  hotkeys?: Record<string, string> // 扩展：{ "Q":"政治", "W":"历史" }
+}
+export interface ColumnSpec {
+  code: string
+  type: string
+  role: ColumnRole
+  label?: string
+  pk?: boolean
+  field?: FieldConfig
 }
 export interface FormSchema {
   version: number
-  source_fields: SourceField[]
-  annotation_fields: AnnotationField[]
+  primary_cols: string[]
+  columns: ColumnSpec[]
 }
 
 // ---- 数据集 ----
@@ -121,12 +110,11 @@ export interface TaskBundle {
   ai_suggestion?: AnnotationData | null
 }
 
-// ---- 标注数据（含 AI 预留元字段）----
+// ---- 标注数据（v2：补全 fill 列的值）----
 export interface AnnotationData {
-  [fieldCode: string]: unknown
+  fills: Record<string, unknown> // fill 列 code → 填入值
   _source?: 'human' | 'ai' | 'ai-edited'
-  _ai_confidence?: number
-  _ai_reasoning?: string
+  _durationSec?: number
 }
 export interface SubmitPayload {
   data: AnnotationData

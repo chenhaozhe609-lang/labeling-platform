@@ -1,6 +1,6 @@
 import { ChevronRight, History } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import type { AnnotationHistory, FormSchema } from '@/types'
+import type { AnnotationHistory } from '@/types'
 
 export function ContextPane({
   datasetName,
@@ -67,21 +67,27 @@ function Meta({ k, v, mono }: { k: string; v: string; mono?: boolean }) {
   )
 }
 
+export interface ReadingField {
+  code: string
+  label: string
+  primary?: boolean
+}
+
 export function ReadingPane({
   sourceRow,
-  sourceFields,
+  fields,
   detailsOpen,
   onToggleDetails,
   scrollRef,
 }: {
   sourceRow: Record<string, unknown>
-  sourceFields: FormSchema['source_fields']
+  fields: ReadingField[]
   detailsOpen: boolean
   onToggleDetails: () => void
   scrollRef: React.RefObject<HTMLDivElement | null>
 }) {
-  const primary = sourceFields.filter((f) => f.primary)
-  const others = sourceFields.filter((f) => !f.primary)
+  const primary = fields.filter((f) => f.primary)
+  const others = fields.filter((f) => !f.primary)
   const [head, ...rest] = primary
 
   return (

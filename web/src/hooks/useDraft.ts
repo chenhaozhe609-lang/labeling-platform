@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
-import type { AnnotationData } from '@/types'
+
+type Draft = Record<string, unknown> // fill 列 → 值
 
 const key = (taskId: number) => `draft:${taskId}`
 
-export function loadDraft(taskId: number): AnnotationData | null {
+export function loadDraft(taskId: number): Draft | null {
   try {
     const raw = localStorage.getItem(key(taskId))
-    return raw ? (JSON.parse(raw) as AnnotationData) : null
+    return raw ? (JSON.parse(raw) as Draft) : null
   } catch {
     return null
   }
@@ -23,7 +24,7 @@ export function clearDraft(taskId: number): void {
 export type SaveState = 'idle' | 'editing' | 'saving' | 'saved' | 'restored'
 
 /** 监听 values 变化，debounce 写入 localStorage，并暴露给 AutosaveIndicator 的状态 */
-export function useAutosave(taskId: number, values: AnnotationData, dirty: boolean): SaveState {
+export function useAutosave(taskId: number, values: Draft, dirty: boolean): SaveState {
   const [state, setState] = useState<SaveState>('idle')
   const timer = useRef<number | undefined>(undefined)
 

@@ -7,17 +7,15 @@ import { getDatasetDetail, updateFormSchema } from '@/api/datasets'
 import { queryClient } from '@/lib/query'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import type { AnnotationField, AnnotationWidget, FieldOption } from '@/types'
+import { cn } from '@/lib/utils'
+import type { ColumnRole, ColumnSpec, FieldKind, FieldOption } from '@/types'
 
-const WIDGETS: AnnotationWidget[] = ['Select', 'MultiSelect', 'Rating', 'Confidence', 'TextArea', 'Input', 'Switch']
-
-interface Draft {
-  code: string
-  label: string
-  widget: AnnotationWidget
-  required: boolean
-  options: FieldOption[]
-}
+const ROLES: { value: ColumnRole; label: string }[] = [
+  { value: 'context', label: '上下文' },
+  { value: 'fill', label: '补全' },
+  { value: 'hidden', label: '隐藏' },
+]
+const KINDS: FieldKind[] = ['text', 'single', 'multi', 'number', 'bool', 'date']
 
 export function SchemaEditorPage() {
   const { id } = useParams<{ id: string }>()
@@ -25,61 +23,46 @@ export function SchemaEditorPage() {
   const nav = useNavigate()
   const { data, isLoading } = useQuery({ queryKey: ['dataset', dsId], queryFn: () => getDatasetDetail(dsId) })
 
-  const [drafts, setDrafts] = useState<Draft[]>([])
+  const [cols, setCols] = useState<ColumnSpec[]>([])
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    if (!data) return
-    setDrafts(
-      (data.dataset.form_schema?.annotation_fields ?? []).map((f) => ({
-        code: f.code,
-        label: f.label,
-        widget: f.widget,
-        required: !!f.required,
-        options: f.options ?? [],
-      })),
-    )
+    if (data) setCols(data.dataset.form_schema?.columns ?? [])
   }, [data])
 
   if (isLoading || !data) return <div className="px-8 py-8 text-sm text-muted-foreground">加载中…</div>
 
-  function update(i: number, patch: Partial<Draft>) {
-    setDrafts((ds) => ds.map((d, j) => (j === i ? { ...d, ...patch } : d)))
+  function update(i: number, patch: Partial<ColumnSpec>) {
+    setCols((cs) => cs.map((c, j) => (j === i ? { ...c, ...patch } : c)))
   }
-  function addField() {
-    setDrafts((ds) => [...ds, { code: '', label: '', widget: 'Select', required: false, options: [] }])
+  function setRole(i: number, role: ColumnRole) {
+    setCols((cs) =>
+      cs.map((c, j) => {
+        if (j !== i) return c
+        const next: ColumnSpec = { ...c, role }
+        if (role === 'fill' && !next.field) next.field = { kind: 'text' }
+        return next
+      }),
+    )
   }
-  function removeField(i: number) {
-    setDrafts((ds) => ds.filter((_, j) => j !== i))
+  function setKind(i: number, kind: FieldKind) {
+    setCols((cs) => cs.map((c, j) => (j === i ? { ...c, field: { ...(c.field ?? { kind }), kind } } : c)))
+  }
+  function setOptions(i: number, options: FieldOption[]) {
+    setCols((cs) => cs.map((c, j) => (j === i ? { ...c, field: { ...(c.field ?? { kind: 'single' }), options } } : c)))
   }
 
-  const codes = drafts.map((d) => d.code.trim())
+  const fillCount = cols.filter((c) => c.role === 'fill').length
   const valid =
-    drafts.every((d) => d.code.trim() && d.label.trim()) &&
-    new Set(codes).size === codes.length &&
-    drafts.every((d) => !needsOptions(d.widget) || d.options.length > 0)
+    fillCount > 0 &&
+    cols.every((c) => c.role !== 'fill' || c.field?.kind !== 'single' || (c.field.options?.length ?? 0) > 0)
 
   async function save() {
     setSaving(true)
     try {
-      const annotation_fields: AnnotationField[] = drafts.map((d) => {
-        const f: AnnotationField = { code: d.code.trim(), label: d.label.trim(), widget: d.widget, group: 'core' }
-        if (d.required) f.required = true
-        if (needsOptions(d.widget)) f.options = d.options
-        if (d.widget === 'Rating') {
-          f.min = 1
-          f.max = 5
-        }
-        if (d.widget === 'Confidence') {
-          f.min = 0
-          f.max = 1
-          f.step = 0.1
-        }
-        return f
-      })
-      const fs = { ...data!.dataset.form_schema, annotation_fields }
+      const fs = { ...data!.dataset.form_schema, columns: cols }
       const res = await updateFormSchema(dsId, fs)
-      toast.success(`已保存 · form_schema v${res.form_schema_version}`)
+      toast.success(`已保存 · form_schema v${res.form_schema_version}（记得「生成任务」）`)
       queryClient.invalidateQueries({ queryKey: ['dataset', dsId] })
       nav(`/datasets/${dsId}`)
     } catch {
@@ -90,84 +73,106 @@ export function SchemaEditorPage() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl px-8 py-8">
+    <div className="mx-auto max-w-3xl px-8 py-8">
       <Link to={`/datasets/${dsId}`} className="mb-5 inline-flex items-center gap-1 text-[13px] text-muted-foreground hover:text-foreground">
         <ArrowLeft className="size-4" />
         {data.dataset.name}
       </Link>
-      <h1 className="mb-1 text-xl font-semibold tracking-tight">编辑标注字段</h1>
-      <p className="mb-6 text-[13px] text-text-tertiary">保存后 form_schema 版本号 +1；源字段（只读）不在此编辑。</p>
+      <h1 className="mb-1 text-xl font-semibold tracking-tight">列与字段</h1>
+      <p className="mb-6 text-[13px] text-text-tertiary">
+        为每列指定角色：<b>上下文</b>（只读，也作 AI 预填依据）·<b>补全</b>（待标注，按类型配置控件）·<b>隐藏</b>。保存后回详情页点「生成任务」。
+      </p>
 
-      <div className="flex flex-col gap-3">
-        {drafts.map((d, i) => (
-          <div key={i} className="rounded-lg border border-border bg-card p-4">
-            <div className="mb-3 flex items-center gap-2">
-              <Input value={d.label} onChange={(e) => update(i, { label: e.target.value })} placeholder="显示名，如 主题分类" className="flex-1" />
-              <Input value={d.code} onChange={(e) => update(i, { code: e.target.value })} placeholder="code，如 topic" className="w-36 font-mono" />
-              <button onClick={() => removeField(i)} className="grid size-9 place-items-center rounded-md text-text-tertiary hover:bg-destructive/10 hover:text-destructive">
-                <Trash2 className="size-4" />
-              </button>
-            </div>
-            <div className="flex items-center gap-4 text-[13px]">
-              <select
-                value={d.widget}
-                onChange={(e) => update(i, { widget: e.target.value as AnnotationWidget })}
-                className="h-9 rounded-md border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring"
-              >
-                {WIDGETS.map((w) => (
-                  <option key={w} value={w} className="bg-popover">{w}</option>
-                ))}
-              </select>
-              <label className="flex items-center gap-1.5 text-muted-foreground">
-                <input type="checkbox" checked={d.required} onChange={(e) => update(i, { required: e.target.checked })} />
-                必填
-              </label>
+      <div className="flex flex-col gap-2">
+        {cols.map((c, i) => (
+          <div key={c.code} className="rounded-lg border border-border bg-card p-3">
+            <div className="flex items-center gap-2">
+              <span className="font-medium">{c.label || c.code}</span>
+              <span className="font-mono text-[11px] text-text-tertiary">{c.code} · {c.type}</span>
+              {c.pk && <span className="rounded bg-surface-2 px-1.5 text-[11px] text-text-tertiary">主键</span>}
+              <div className="ml-auto flex gap-1">
+                {c.pk ? (
+                  <span className="rounded-md border border-border px-2 py-1 text-[12px] text-text-tertiary">id</span>
+                ) : (
+                  ROLES.map((r) => (
+                    <button
+                      key={r.value}
+                      onClick={() => setRole(i, r.value)}
+                      className={cn(
+                        'rounded-md border px-2.5 py-1 text-[12px] transition-colors',
+                        c.role === r.value
+                          ? 'border-primary bg-primary text-primary-foreground'
+                          : 'border-border text-muted-foreground hover:bg-surface-3',
+                      )}
+                    >
+                      {r.label}
+                    </button>
+                  ))
+                )}
+              </div>
             </div>
 
-            {needsOptions(d.widget) && (
-              <OptionsEditor options={d.options} onChange={(opts) => update(i, { options: opts })} />
+            {c.role === 'fill' && (
+              <div className="mt-3 border-t border-border-subtle pt-3">
+                <div className="flex items-center gap-2 text-[13px]">
+                  <span className="text-text-tertiary">控件</span>
+                  <select
+                    value={c.field?.kind ?? 'text'}
+                    onChange={(e) => setKind(i, e.target.value as FieldKind)}
+                    className="h-8 rounded-md border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring"
+                  >
+                    {KINDS.map((k) => (
+                      <option key={k} value={k} className="bg-popover">{k}</option>
+                    ))}
+                  </select>
+                  {c.field?.kind === 'text' && (
+                    <Input
+                      value={c.field?.placeholder ?? ''}
+                      onChange={(e) => update(i, { field: { ...(c.field ?? { kind: 'text' }), placeholder: e.target.value } })}
+                      placeholder="placeholder（可选）"
+                      className="h-8 flex-1"
+                    />
+                  )}
+                </div>
+                {(c.field?.kind === 'single' || c.field?.kind === 'multi') && (
+                  <OptionsEditor options={c.field?.options ?? []} onChange={(o) => setOptions(i, o)} />
+                )}
+              </div>
             )}
           </div>
         ))}
       </div>
 
-      <button onClick={addField} className="mt-3 inline-flex items-center gap-1.5 text-[13px] text-primary hover:underline">
-        <Plus className="size-4" />
-        添加字段
-      </button>
-
-      <div className="mt-6 flex gap-2">
+      <div className="mt-6 flex items-center gap-2">
         <Button onClick={save} disabled={!valid || saving}>
           {saving && <Loader2 className="size-4 animate-spin" />}
           保存
         </Button>
         <Link to={`/datasets/${dsId}`} className="btn-ghost">取消</Link>
+        {fillCount === 0 && <span className="text-[12px] text-warning">至少需要一个「补全」列</span>}
       </div>
     </div>
   )
 }
 
-function needsOptions(w: AnnotationWidget) {
-  return w === 'Select' || w === 'MultiSelect'
-}
-
 function OptionsEditor({ options, onChange }: { options: FieldOption[]; onChange: (o: FieldOption[]) => void }) {
   return (
-    <div className="mt-3 border-t border-border-subtle pt-3">
+    <div className="mt-2">
       <div className="mb-1.5 text-[11px] uppercase tracking-wide text-text-tertiary">选项</div>
       <div className="flex flex-col gap-1.5">
         {options.map((o, i) => (
           <div key={i} className="flex gap-2">
-            <Input value={o.label} onChange={(e) => onChange(options.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))} placeholder="显示" className="flex-1" />
-            <Input value={o.value} onChange={(e) => onChange(options.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))} placeholder="value" className="w-32 font-mono" />
-            <button onClick={() => onChange(options.filter((_, j) => j !== i))} className="grid size-9 place-items-center rounded-md text-text-tertiary hover:text-destructive">
+            <Input value={o.label} onChange={(e) => onChange(options.map((x, j) => (j === i ? { ...x, label: e.target.value, value: x.value || e.target.value } : x)))} placeholder="显示" className="h-8 flex-1" />
+            <Input value={o.value} onChange={(e) => onChange(options.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))} placeholder="value" className="h-8 w-28 font-mono" />
+            <Input value={o.key ?? ''} onChange={(e) => onChange(options.map((x, j) => (j === i ? { ...x, key: e.target.value } : x)))} placeholder="键" className="h-8 w-14" />
+            <button onClick={() => onChange(options.filter((_, j) => j !== i))} className="grid size-8 place-items-center rounded-md text-text-tertiary hover:text-destructive">
               <Trash2 className="size-3.5" />
             </button>
           </div>
         ))}
       </div>
-      <button onClick={() => onChange([...options, { value: '', label: '' }])} className="mt-1.5 text-[12px] text-primary hover:underline">
-        + 选项
+      <button onClick={() => onChange([...options, { value: '', label: '' }])} className="mt-1.5 inline-flex items-center gap-1 text-[12px] text-primary hover:underline">
+        <Plus className="size-3" />选项
       </button>
     </div>
   )

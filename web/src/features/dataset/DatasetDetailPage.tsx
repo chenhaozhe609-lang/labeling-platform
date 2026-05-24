@@ -2,8 +2,8 @@ import { useRef } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import { ArrowLeft, Loader2, PenLine, RefreshCw, Settings2 } from 'lucide-react'
-import { getDatasetDetail, syncDataset } from '@/api/datasets'
+import { ArrowLeft, ListPlus, Loader2, PenLine, RefreshCw, Settings2 } from 'lucide-react'
+import { generateTasks, getDatasetDetail, syncDataset } from '@/api/datasets'
 import { useAuth } from '@/stores/auth'
 
 export function DatasetDetailPage() {
@@ -28,14 +28,25 @@ export function DatasetDetailPage() {
     onError: () => toast.error('同步失败'),
   })
 
+  const gen = useMutation({
+    mutationFn: () => generateTasks(dsId),
+    onSuccess: (d) => {
+      qc.invalidateQueries({ queryKey: ['dataset', dsId] })
+      qc.invalidateQueries({ queryKey: ['datasets'] })
+      toast.success(`已生成任务 · 待领 ${d.progress.pending}`)
+    },
+    onError: () => toast.error('生成任务失败（需先配置补全列）'),
+  })
+
   if (isLoading) return <Pad>加载中…</Pad>
   if (error || !data) return <Pad>加载失败</Pad>
 
   const { dataset: d, progress, batches } = data
   const total = d.total_rows || 0
   const pct = total > 0 ? Math.round((progress.completed / total) * 100) : 0
-  const fields = d.form_schema?.annotation_fields ?? []
-  const sources = d.form_schema?.source_fields ?? []
+  const cols = d.form_schema?.columns ?? []
+  const fillCols = cols.filter((c) => c.role === 'fill')
+  const contextCols = cols.filter((c) => c.role === 'context')
 
   return (
     <div className="mx-auto max-w-3xl px-8 py-8">
@@ -99,29 +110,40 @@ export function DatasetDetailPage() {
         </div>
       </section>
 
-      {/* 字段概览 */}
+      {/* 列角色概览 */}
       <section className="mb-6 grid grid-cols-2 gap-4">
-        <FieldBox title={`源字段 · ${sources.length}`}>
-          {sources.map((f) => (
-            <li key={f.code} className="flex justify-between">
-              <span>{f.label || f.code}</span>
-              <span className="font-mono text-text-tertiary">{f.widget}</span>
-            </li>
-          ))}
-        </FieldBox>
-        <FieldBox title={`标注字段 · ${fields.length}`}>
-          {fields.length === 0 ? (
-            <li className="text-text-tertiary">尚未配置{isAdmin && '，点「编辑字段」添加'}</li>
+        <FieldBox title={`上下文列 · ${contextCols.length}`}>
+          {contextCols.length === 0 ? (
+            <li className="text-text-tertiary">无</li>
           ) : (
-            fields.map((f) => (
-              <li key={f.code} className="flex justify-between">
-                <span>{f.label || f.code}{f.required && <span className="text-destructive"> *</span>}</span>
-                <span className="font-mono text-text-tertiary">{f.widget}</span>
+            contextCols.map((c) => (
+              <li key={c.code} className="flex justify-between">
+                <span>{c.label || c.code}</span>
+                <span className="font-mono text-text-tertiary">{c.type}</span>
+              </li>
+            ))
+          )}
+        </FieldBox>
+        <FieldBox title={`补全列 · ${fillCols.length}`}>
+          {fillCols.length === 0 ? (
+            <li className="text-text-tertiary">尚未配置{isAdmin && '，点「列与字段」勾选'}</li>
+          ) : (
+            fillCols.map((c) => (
+              <li key={c.code} className="flex justify-between">
+                <span>{c.label || c.code}</span>
+                <span className="font-mono text-text-tertiary">{c.field?.kind ?? c.type}</span>
               </li>
             ))
           )}
         </FieldBox>
       </section>
+
+      {isAdmin && fillCols.length > 0 && (
+        <button onClick={() => gen.mutate()} disabled={gen.isPending} className="btn-ghost mb-6">
+          {gen.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <ListPlus className="size-3.5" />}
+          生成任务（扫描有空补全列的行）
+        </button>
+      )}
 
       {/* 批次时间线 */}
       <section>
