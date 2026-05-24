@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 
 export type LeaseState = 'healthy' | 'warning' | 'critical' | 'expired'
 
@@ -8,26 +8,29 @@ function format(sec: number): string {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
 }
 
-/** 租约倒计时。resetKey 变化（切到新任务）时重置。 */
-export function useLeaseTimer(durationMin: number, resetKey: unknown) {
-  const total = durationMin * 60
-  const [remaining, setRemaining] = useState(total)
+/** 基于服务端返回的绝对到期时间倒计时（每秒刷新）。 */
+export function useLeaseTimer(expiresAt: string | null) {
+  const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
-    setRemaining(total)
-  }, [resetKey, total])
-
-  useEffect(() => {
-    const id = window.setInterval(() => {
-      setRemaining((r) => (r > 0 ? r - 1 : 0))
-    }, 1000)
+    const id = window.setInterval(() => setNow(Date.now()), 1000)
     return () => window.clearInterval(id)
   }, [])
 
-  const extend = useCallback(() => setRemaining(total), [total])
+  const remaining = expiresAt
+    ? Math.max(0, Math.floor((new Date(expiresAt).getTime() - now) / 1000))
+    : 0
 
   const state: LeaseState =
-    remaining <= 0 ? 'expired' : remaining <= 60 ? 'critical' : remaining <= 300 ? 'warning' : 'healthy'
+    !expiresAt || remaining <= 0
+      ? expiresAt
+        ? 'expired'
+        : 'healthy'
+      : remaining <= 60
+        ? 'critical'
+        : remaining <= 300
+          ? 'warning'
+          : 'healthy'
 
-  return { mmss: format(remaining), state, remaining, extend }
+  return { mmss: format(remaining), state, remaining }
 }

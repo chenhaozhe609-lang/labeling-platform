@@ -11,4 +11,10 @@ export default defineConfig({
       '@': path.resolve(import.meta.dirname, './src'),
     },
   },
+  server: {
+    // 把 /api 代理到后端，规避跨域与端口波动
+    proxy: {
+      '/api': 'http://localhost:8090',
+    },
+  },
 })

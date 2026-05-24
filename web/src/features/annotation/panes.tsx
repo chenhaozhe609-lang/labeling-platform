@@ -3,24 +3,21 @@ import { cn } from '@/lib/utils'
 import type { AnnotationHistory, FormSchema } from '@/types'
 
 export function ContextPane({
+  datasetName,
   pk,
-  sourceVersion,
-  batch,
   round,
   history,
 }: {
+  datasetName: string
   pk: string
-  sourceVersion: string
-  batch: string
   round: number
   history: AnnotationHistory[]
 }) {
   return (
     <div className="flex h-full flex-col gap-6 overflow-y-auto p-4 text-[13px]">
       <Section title="上下文">
+        <Meta k="数据集" v={datasetName} />
         <Meta k="主键 pk" v={pk} mono />
-        <Meta k="来源版本" v={sourceVersion} />
-        <Meta k="导入批次" v={batch} />
         <Meta k="重标轮次" v={`round ${round}`} />
       </Section>
 

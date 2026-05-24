@@ -1,18 +1,21 @@
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { CornerDownLeft, LogOut, PartyPopper, RefreshCw, SkipForward } from 'lucide-react'
+import { CornerDownLeft, Loader2, LogOut, PartyPopper, RefreshCw, SkipForward } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Kbd } from '@/components/Kbd'
-import type { AnnotationData, AnnotationField } from '@/types'
-import { mockDatasetName, mockHistory, mockQueue } from '@/mocks/workbench'
+import type { AnnotationData, AnnotationField, DatasetListItem, TaskBundle } from '@/types'
+import { claimTask, heartbeat, listDatasets, releaseTask, submitTask } from '@/api/tasks'
 import { clearDraft, loadDraft, useAutosave } from '@/hooks/useDraft'
 import { useLeaseTimer } from '@/hooks/useLeaseTimer'
+import { useHeartbeat } from '@/hooks/useHeartbeat'
 import { SchemaForm } from './SchemaForm'
 import { ContextPane, ReadingPane } from './panes'
 import { AutosaveIndicator, LeaseTimer, ShortcutHintBar } from './statusbar'
 
 export type FocusContext = 'reading' | 'widget' | 'field'
+
+type Phase = 'loading' | 'ready' | 'empty' | 'nodataset'
 
 const isEmpty = (v: unknown) => v === undefined || v === null || v === ''
 
@@ -23,7 +26,12 @@ function defaultsFor(fields: AnnotationField[]): AnnotationData {
 }
 
 export function AnnotationWorkbench() {
-  const [index, setIndex] = useState(0)
+  const [phase, setPhase] = useState<Phase>('loading')
+  const [dataset, setDataset] = useState<DatasetListItem | null>(null)
+  const [bundle, setBundle] = useState<TaskBundle | null>(null)
+  const [leaseExpiresAt, setLeaseExpiresAt] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+
   const [values, setValues] = useState<AnnotationData>({})
   const [activeFieldCode, setActiveFieldCode] = useState<string | null>(null)
   const [detailsOpen, setDetailsOpen] = useState(false)
@@ -34,28 +42,48 @@ export function AnnotationWorkbench() {
 
   const readingRef = useRef<HTMLDivElement | null>(null)
 
-  const current = index < mockQueue.length ? mockQueue[index] : null
-  const fields = current ? current.form_schema.annotation_fields : []
+  const task = bundle?.task ?? null
+  const fields = bundle?.form_schema.annotation_fields ?? []
 
-  const lease = useLeaseTimer(30, current?.task.id)
-  const saveState = useAutosave(current?.task.id ?? 0, values, dirty)
+  const lease = useLeaseTimer(leaseExpiresAt)
+  const saveState = useAutosave(task?.id ?? 0, values, dirty)
   const displaySave = restored && !dirty ? 'restored' : saveState
+  useHeartbeat(phase === 'ready' ? (task?.id ?? null) : null, phase === 'ready', setLeaseExpiresAt)
+
+  // 首次：取数据集 → 领第一条
+  useEffect(() => {
+    void (async () => {
+      try {
+        const list = await listDatasets()
+        const ds = list.find((d) => d.status === 'READY') ?? list[0]
+        if (!ds) {
+          setPhase('nodataset')
+          return
+        }
+        setDataset(ds)
+        await claimNext(ds.id)
+      } catch {
+        setPhase('nodataset')
+      }
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // 切到新任务：恢复草稿 / 套默认值 / 复位
   useEffect(() => {
-    const cur = mockQueue[index]
-    if (!cur) return
-    const flds = cur.form_schema.annotation_fields
-    const draft = loadDraft(cur.task.id)
+    if (!bundle) return
+    const flds = bundle.form_schema.annotation_fields
+    const draft = loadDraft(bundle.task.id)
     setValues(draft ?? defaultsFor(flds))
     setActiveFieldCode(flds[0]?.code ?? null)
     setErrors({})
     setDirty(false)
     setRestored(!!draft)
     setDetailsOpen(false)
-  }, [index])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bundle?.task.id])
 
-  // 焦点态跟踪（驱动底部快捷键提示 + 键盘分流）
+  // 焦点态跟踪
   useEffect(() => {
     const handler = () => {
       const el = document.activeElement as HTMLElement | null
@@ -69,14 +97,28 @@ export function AnnotationWorkbench() {
       }
     }
     document.addEventListener('focusin', handler)
-    document.addEventListener('focusout', () => window.setTimeout(handler, 0))
-    return () => {
-      document.removeEventListener('focusin', handler)
-      document.removeEventListener('focusout', handler)
-    }
+    return () => document.removeEventListener('focusin', handler)
   }, [])
 
-  // ---- 动作 ----
+  async function claimNext(datasetId: number) {
+    setPhase('loading')
+    try {
+      const res = await claimTask(datasetId)
+      if (!res.task) {
+        setBundle(null)
+        setPhase('empty')
+        return
+      }
+      const b = res as TaskBundle
+      setBundle(b)
+      setLeaseExpiresAt(b.task.lease_expires_at ?? null)
+      setPhase('ready')
+    } catch {
+      toast.error('领取任务失败')
+      setPhase('empty')
+    }
+  }
+
   function setValue(code: string, v: unknown) {
     setValues((p) => ({ ...p, [code]: v }))
     setDirty(true)
@@ -98,8 +140,8 @@ export function AnnotationWorkbench() {
   }
 
   function acceptAi() {
-    if (!current?.ai_suggestion) return
-    const ai = current.ai_suggestion
+    if (!bundle?.ai_suggestion) return
+    const ai = bundle.ai_suggestion
     const merged: AnnotationData = { ...values }
     for (const f of fields) if (ai[f.code] !== undefined) merged[f.code] = ai[f.code]
     merged._source = 'ai'
@@ -120,31 +162,54 @@ export function AnnotationWorkbench() {
     return true
   }
 
-  function advance() {
-    setIndex((i) => i + 1)
-  }
-
-  function submit() {
-    if (!current) return
+  async function submit() {
+    if (!bundle || submitting) return
     if (lease.state === 'expired') {
       toast.error('租约已过期，请重新领取任务')
       return
     }
     if (!validate()) return
-    clearDraft(current.task.id)
-    toast.success(`已提交 · #${current.task.id}`)
-    advance()
+    setSubmitting(true)
+    const id = bundle.task.id
+    try {
+      await submitTask(id, values, bundle.form_schema.version)
+      clearDraft(id)
+      toast.success(`已提交 · #${id}`)
+      await claimNext(bundle.task.dataset_id)
+    } catch {
+      toast.error('任务已超时或被回收，已为你领取下一条')
+      if (dataset) await claimNext(dataset.id)
+    } finally {
+      setSubmitting(false)
+    }
   }
 
-  function releaseTo(action: string) {
-    const at = index
-    toast(action, { action: { label: '撤销', onClick: () => setIndex(at) } })
-    advance()
+  async function releaseTo(label: string) {
+    if (!bundle) return
+    const dsId = bundle.task.dataset_id
+    try {
+      await releaseTask(bundle.task.id)
+    } catch {
+      /* 幂等：忽略 */
+    }
+    toast(label)
+    await claimNext(dsId)
   }
 
-  // ---- 键盘（三焦点态模型）----
+  async function extendLease() {
+    if (!task) return
+    try {
+      const r = await heartbeat(task.id)
+      setLeaseExpiresAt(r.lease_expires_at)
+      toast.success('已延长租约')
+    } catch {
+      toast.error('续约失败，任务可能已被回收')
+    }
+  }
+
+  // 键盘（三焦点态模型）
   const keyHandler = (e: KeyboardEvent) => {
-    if (!current) return
+    if (phase !== 'ready' || !bundle) return
     const el = document.activeElement as HTMLElement | null
     const tag = el?.tagName
     const isTextInput =
@@ -153,7 +218,7 @@ export function AnnotationWorkbench() {
 
     if (mod && e.key === 'Enter') {
       e.preventDefault()
-      submit()
+      void submit()
       return
     }
     if (mod && (e.key === 'a' || e.key === 'A')) {
@@ -166,14 +231,14 @@ export function AnnotationWorkbench() {
         el?.blur()
         setActiveFieldCode(null)
       }
-      return // FIELD 态：单键全禁用
+      return
     }
     if (e.altKey || mod) return
 
     const key = e.key
     if (key === 'Enter') {
       e.preventDefault()
-      submit()
+      void submit()
       return
     }
     if (key === 'Escape') {
@@ -181,7 +246,7 @@ export function AnnotationWorkbench() {
         setActiveFieldCode(null)
         el?.blur()
       } else {
-        releaseTo('已放回任务池')
+        void releaseTo('已放回任务池')
       }
       return
     }
@@ -199,11 +264,10 @@ export function AnnotationWorkbench() {
       return
     }
     if (key === 's' || key === 'S' || key === 'ArrowRight') {
-      releaseTo('已跳过 · 放回任务池')
+      void releaseTo('已跳过 · 放回任务池')
       return
     }
 
-    // 数字键：路由到当前活动字段，否则首个选项/评分字段
     if (/^[1-9]$/.test(key)) {
       const n = Number(key)
       const target =
@@ -230,7 +294,6 @@ export function AnnotationWorkbench() {
       return
     }
 
-    // 字母快捷键：confidence 预设优先，否则查字段 hotkeys
     const K = key.toUpperCase()
     const activeF = fields.find((f) => f.code === activeFieldCode)
     if (activeF?.widget === 'Confidence' && (K === 'Q' || K === 'W' || K === 'E')) {
@@ -244,7 +307,6 @@ export function AnnotationWorkbench() {
     }
   }
 
-  // 稳定 listener，始终调用最新闭包
   const handlerRef = useRef(keyHandler)
   handlerRef.current = keyHandler
   useEffect(() => {
@@ -253,43 +315,54 @@ export function AnnotationWorkbench() {
     return () => window.removeEventListener('keydown', fn)
   }, [])
 
-  // ---- 队列标完：空态 ----
-  if (!current) {
+  // ---- 非就绪态 ----
+  if (phase === 'loading') {
+    return (
+      <div className="flex h-svh items-center justify-center bg-background text-muted-foreground">
+        <Loader2 className="mr-2 size-5 animate-spin" />
+        正在领取任务…
+      </div>
+    )
+  }
+  if (phase === 'nodataset') {
+    return (
+      <CenterCard title="暂无可用数据集" desc="请联系管理员上传数据集后再来标注。" />
+    )
+  }
+  if (phase === 'empty' || !bundle) {
     return (
       <div className="flex h-svh flex-col items-center justify-center gap-4 bg-background text-center">
         <PartyPopper className="size-10 text-success" />
         <div>
-          <div className="text-lg font-semibold">本数据集已全部标完</div>
+          <div className="text-lg font-semibold">该数据集已全部标完</div>
           <div className="mt-1 text-sm text-muted-foreground">
-            共完成 {mockQueue.length} 条 · 按 <Kbd>⌘K</Kbd> 切换数据集
+            {dataset?.name} · 共 {dataset?.total_rows ?? 0} 条
           </div>
         </div>
-        <Button variant="secondary" size="sm" onClick={() => setIndex(0)}>
-          <RefreshCw className="size-3.5" />
-          重新开始（演示）
-        </Button>
+        {dataset && (
+          <Button variant="secondary" size="sm" onClick={() => claimNext(dataset.id)}>
+            <RefreshCw className="size-3.5" />
+            再试一次
+          </Button>
+        )}
       </div>
     )
   }
 
-  const { task } = current
-
   return (
     <div className="flex h-svh flex-col bg-background text-foreground">
-      {/* 顶栏 */}
       <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border px-4 text-[13px]">
-        <span className="font-medium">{mockDatasetName}</span>
+        <span className="font-medium">{dataset?.name ?? '标注'}</span>
         <Sep />
-        <span className="font-mono tabular text-muted-foreground">#{task.id}</span>
-        {task.round > 1 && (
+        <span className="font-mono tabular text-muted-foreground">#{task!.id}</span>
+        {task!.round > 1 && (
           <Badge variant="secondary" className="gap-1 font-normal">
             <RefreshCw className="size-3" />
-            round {task.round}
+            round {task!.round}
           </Badge>
         )}
         <Sep />
-        <LeaseTimer mmss={lease.mmss} state={lease.state} onExtend={lease.extend} />
-
+        <LeaseTimer mmss={lease.mmss} state={lease.state} onExtend={extendLease} />
         <div className="ml-auto flex items-center gap-2">
           <AutosaveIndicator state={displaySave} />
           <Button variant="ghost" size="sm" onClick={() => releaseTo('已跳过 · 放回任务池')}>
@@ -305,31 +378,26 @@ export function AnnotationWorkbench() {
             <LogOut className="size-3.5" />
             释放
           </Button>
-          <span className="ml-1 font-mono text-[12px] tabular text-text-tertiary">
-            {index + 1}/{mockQueue.length}
-          </span>
         </div>
       </header>
 
-      {/* 三栏 */}
       <div className="flex min-h-0 flex-1">
         <aside className="w-[280px] shrink-0 border-r border-border">
           <ContextPane
-            pk={task.source_row_pk}
-            sourceVersion="v3"
-            batch="#5"
-            round={task.round}
-            history={mockHistory[task.id] ?? []}
+            datasetName={dataset?.name ?? ''}
+            pk={task!.source_row_pk}
+            round={task!.round}
+            history={[]}
           />
         </aside>
 
         <main
-          key={task.id}
+          key={task!.id}
           className="min-w-0 flex-1 border-r border-border duration-200 animate-in fade-in slide-in-from-right-2"
         >
           <ReadingPane
-            sourceRow={current.source_row}
-            sourceFields={current.form_schema.source_fields}
+            sourceRow={bundle.source_row}
+            sourceFields={bundle.form_schema.source_fields}
             detailsOpen={detailsOpen}
             onToggleDetails={() => setDetailsOpen((o) => !o)}
             scrollRef={readingRef}
@@ -337,7 +405,7 @@ export function AnnotationWorkbench() {
         </main>
 
         <aside
-          key={`form-${task.id}`}
+          key={`form-${task!.id}`}
           className="flex w-[380px] shrink-0 flex-col overflow-y-auto p-4 duration-200 animate-in fade-in slide-in-from-right-2"
         >
           <div className="flex-1">
@@ -346,7 +414,7 @@ export function AnnotationWorkbench() {
               values={values}
               activeFieldCode={activeFieldCode}
               errors={errors}
-              aiSuggestion={current.ai_suggestion}
+              aiSuggestion={bundle.ai_suggestion}
               onChange={setValue}
               onFieldFocus={setActiveFieldCode}
               onAcceptAi={acceptAi}
@@ -355,9 +423,10 @@ export function AnnotationWorkbench() {
           <div className="sticky bottom-0 mt-4 bg-background pt-2">
             <Button
               onClick={submit}
+              disabled={submitting}
               className="w-full bg-success text-primary-foreground hover:bg-success/90"
             >
-              <CornerDownLeft className="size-4" />
+              {submitting ? <Loader2 className="size-4 animate-spin" /> : <CornerDownLeft className="size-4" />}
               提交并下一条
               <Kbd className="ml-1 border-primary-foreground/20 bg-primary-foreground/10 text-primary-foreground">
                 ↵
@@ -367,7 +436,6 @@ export function AnnotationWorkbench() {
         </aside>
       </div>
 
-      {/* 底栏：随焦点态变化 */}
       <ShortcutHintBar context={ctx} />
     </div>
   )
@@ -375,4 +443,13 @@ export function AnnotationWorkbench() {
 
 function Sep() {
   return <span className="text-text-tertiary">·</span>
+}
+
+function CenterCard({ title, desc }: { title: string; desc: string }) {
+  return (
+    <div className="flex h-svh flex-col items-center justify-center gap-2 bg-background text-center">
+      <div className="text-lg font-semibold">{title}</div>
+      <div className="text-sm text-muted-foreground">{desc}</div>
+    </div>
+  )
 }
