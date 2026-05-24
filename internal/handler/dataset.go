@@ -277,6 +277,16 @@ func (h *DatasetHandler) runSync(ctx context.Context, ds *domain.Dataset, batchI
 	return nil
 }
 
+// Dashboard 全局看板聚合（admin）。
+func (h *DatasetHandler) Dashboard(c *gin.Context) {
+	d, err := h.store.GetDashboard(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询看板失败"})
+		return
+	}
+	c.JSON(http.StatusOK, d)
+}
+
 func (h *DatasetHandler) Detail(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {

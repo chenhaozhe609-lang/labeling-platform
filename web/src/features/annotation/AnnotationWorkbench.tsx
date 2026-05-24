@@ -10,6 +10,7 @@ import { claimTask, heartbeat, listDatasets, releaseTask, submitTask } from '@/a
 import { clearDraft, loadDraft, useAutosave } from '@/hooks/useDraft'
 import { useLeaseTimer } from '@/hooks/useLeaseTimer'
 import { useHeartbeat } from '@/hooks/useHeartbeat'
+import { useSettings } from '@/stores/settings'
 import { SchemaForm } from './SchemaForm'
 import { ContextPane, ReadingPane, type ReadingField } from './panes'
 import { AutosaveIndicator, LeaseTimer, ShortcutHintBar } from './statusbar'
@@ -39,6 +40,7 @@ export function AnnotationWorkbench() {
   const [ctx, setCtx] = useState<FocusContext>('reading')
 
   const [searchParams] = useSearchParams()
+  const shortcutsEnabled = useSettings((s) => s.shortcuts)
   const readingRef = useRef<HTMLDivElement | null>(null)
 
   const task = bundle?.task ?? null
@@ -205,7 +207,7 @@ export function AnnotationWorkbench() {
   }
 
   const keyHandler = (e: KeyboardEvent) => {
-    if (phase !== 'ready' || !bundle) return
+    if (phase !== 'ready' || !bundle || !shortcutsEnabled) return
     const el = document.activeElement as HTMLElement | null
     const tag = el?.tagName
     const inText = tag === 'TEXTAREA' || tag === 'INPUT'
