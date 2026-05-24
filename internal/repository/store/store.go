@@ -11,7 +11,19 @@ import (
 	"github.com/chenhaozhe609-lang/labeling-platform/internal/domain"
 )
 
-var ErrNotFound = errors.New("not found")
+var (
+	ErrNotFound = errors.New("not found")
+	ErrNoTask   = errors.New("no pending task")  // claim 时池中无 PENDING
+	ErrConflict = errors.New("task state conflict") // submit/heartbeat 时任务已被回收或他人占用
+)
+
+// mapNoRows 把 pgx.ErrNoRows 统一转成 ErrNotFound。
+func mapNoRows(err error) error {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	return err
+}
 
 type Store struct {
 	pool *pgxpool.Pool

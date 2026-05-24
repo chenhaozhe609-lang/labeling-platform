@@ -5,6 +5,7 @@
 //	server                                 启动 HTTP 服务
 //	server migrate up|down                 执行/回滚数据库迁移
 //	server createuser <用户名> <密码> <角色>  创建用户（角色：annotator|reviewer|admin）
+//	server seed                            生成 demo 数据（source 表 + dataset + tasks）
 package main
 
 import (
@@ -24,9 +25,11 @@ import (
 	"github.com/chenhaozhe609-lang/labeling-platform/internal/config"
 	"github.com/chenhaozhe609-lang/labeling-platform/internal/domain"
 	"github.com/chenhaozhe609-lang/labeling-platform/internal/handler"
+	"github.com/chenhaozhe609-lang/labeling-platform/internal/job"
 	"github.com/chenhaozhe609-lang/labeling-platform/internal/middleware"
 	"github.com/chenhaozhe609-lang/labeling-platform/internal/platform/db"
 	jwtpkg "github.com/chenhaozhe609-lang/labeling-platform/internal/platform/jwt"
+	"github.com/chenhaozhe609-lang/labeling-platform/internal/repository/source"
 	"github.com/chenhaozhe609-lang/labeling-platform/internal/repository/store"
 )
 
@@ -45,6 +48,9 @@ func main() {
 			return
 		case "createuser":
 			runCreateUser(cfg)
+			return
+		case "seed":
+			runSeed(cfg)
 			return
 		}
 	}
@@ -69,19 +75,16 @@ func runCreateUser(cfg config.Config) {
 	if !role.Valid() {
 		fatal("非法角色（annotator|reviewer|admin）", fmt.Errorf("got %q", role))
 	}
-
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		fatal("密码加密失败", err)
 	}
-
 	ctx := context.Background()
 	pool, err := db.NewPool(ctx, cfg.DatabaseURL)
 	if err != nil {
 		fatal("连接数据库失败", err)
 	}
 	defer pool.Close()
-
 	u, err := store.New(pool).CreateUser(ctx, username, string(hash), role)
 	if err != nil {
 		fatal("创建用户失败", err)
@@ -91,28 +94,39 @@ func runCreateUser(cfg config.Config) {
 
 func runServer(cfg config.Config) {
 	ctx := context.Background()
-	pool, err := db.NewPool(ctx, cfg.DatabaseURL)
+	metaPool, err := db.NewPool(ctx, cfg.DatabaseURL)
 	if err != nil {
-		fatal("连接数据库失败", err)
+		fatal("连接 meta-db 失败", err)
 	}
-	defer pool.Close()
+	defer metaPool.Close()
 
-	st := store.New(pool)
+	sourcePool, err := db.NewPool(ctx, cfg.SourceDatabaseURL)
+	if err != nil {
+		fatal("连接 source-db 失败", err)
+	}
+	defer sourcePool.Close()
+
+	st := store.New(metaPool)
+	src := source.New(sourcePool)
 	jm := jwtpkg.NewManager(cfg.JWTSecret, cfg.AccessTTL, cfg.RefreshTTL)
 	authH := handler.NewAuthHandler(st, jm)
+	taskH := handler.NewTaskHandler(st, src, cfg.LeaseMinutes)
+
+	rootCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	// lease reaper
+	go job.NewReaper(st, time.Minute).Run(rootCtx)
 
 	if cfg.Env == "prod" {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	r := gin.New()
 	r.Use(middleware.Recover(), middleware.Logger(), middleware.CORS(cfg.CORSOrigin))
-
-	r.GET("/healthz", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "ok"})
-	})
+	r.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 
 	api := r.Group("/api")
-	api.Use(middleware.RateLimit(20, 40))
+	api.Use(middleware.RateLimit(50, 100))
 	{
 		auth := api.Group("/auth")
 		auth.POST("/login", authH.Login)
@@ -121,6 +135,14 @@ func runServer(cfg config.Config) {
 		authed := api.Group("")
 		authed.Use(middleware.RequireAuth(jm))
 		authed.GET("/me", authH.Me)
+		authed.GET("/datasets", taskH.ListDatasets)
+
+		tasks := authed.Group("/tasks")
+		tasks.POST("/claim", taskH.Claim)
+		tasks.GET("/:id", taskH.Get)
+		tasks.POST("/:id/heartbeat", taskH.Heartbeat)
+		tasks.POST("/:id/submit", taskH.Submit)
+		tasks.POST("/:id/release", taskH.Release)
 	}
 
 	srv := &http.Server{Addr: cfg.HTTPAddr, Handler: r}
@@ -131,13 +153,10 @@ func runServer(cfg config.Config) {
 	}()
 	slog.Info("服务已启动", "addr", cfg.HTTPAddr, "env", cfg.Env)
 
-	stop, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancel()
-	<-stop.Done()
-
+	<-rootCtx.Done()
 	slog.Info("正在优雅关闭…")
-	shutCtx, cancel2 := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel2()
+	shutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	if err := srv.Shutdown(shutCtx); err != nil {
 		slog.Error("关闭超时", "error", err)
 	}
