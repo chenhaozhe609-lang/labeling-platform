@@ -138,6 +138,15 @@
   }
 }
 
+@layer components {
+  .btn-primary {
+    @apply inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-[13px] font-medium text-primary-foreground transition-opacity hover:opacity-90;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-surface-3 hover:text-foreground;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

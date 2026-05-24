@@ -22,7 +22,7 @@ export function LoginPage() {
     try {
       const res = await login(username, password)
       setAuth(res.access_token, res.refresh_token, res.user)
-      navigate('/workspace', { replace: true })
+      navigate(res.user.role === 'admin' ? '/datasets' : '/workspace', { replace: true })
     } catch {
       setError('用户名或密码错误')
     } finally {

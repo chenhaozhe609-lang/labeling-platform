@@ -65,9 +65,40 @@ export interface DatasetListItem {
   completed: number
   pending: number
   claimed: number
-  active_annotators: number
+  active_annotators?: number
   form_schema_version: number
-  updated_at: string
+  updated_at?: string
+}
+
+export interface DatasetFull {
+  id: number
+  name: string
+  source_schema: string
+  source_table: string
+  source_pk_column: string
+  hash_columns: string[]
+  form_schema: FormSchema
+  form_schema_version: number
+  status: DatasetStatus
+  total_rows: number
+  created_at: string
+}
+
+export interface ImportBatch {
+  id: number
+  dataset_id: number
+  file_name?: string | null
+  file_size_bytes?: number | null
+  new_task_count: number
+  updated_task_count: number
+  error?: string | null
+  created_at: string
+}
+
+export interface DatasetDetail {
+  dataset: DatasetFull
+  progress: { pending: number; claimed: number; completed: number }
+  batches: ImportBatch[]
 }
 
 // ---- 任务（标注台核心）----

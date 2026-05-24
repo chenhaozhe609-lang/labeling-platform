@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { CornerDownLeft, Loader2, LogOut, PartyPopper, RefreshCw, SkipForward } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -40,6 +41,7 @@ export function AnnotationWorkbench() {
   const [restored, setRestored] = useState(false)
   const [ctx, setCtx] = useState<FocusContext>('reading')
 
+  const [searchParams] = useSearchParams()
   const readingRef = useRef<HTMLDivElement | null>(null)
 
   const task = bundle?.task ?? null
@@ -55,7 +57,11 @@ export function AnnotationWorkbench() {
     void (async () => {
       try {
         const list = await listDatasets()
-        const ds = list.find((d) => d.status === 'READY') ?? list[0]
+        const want = searchParams.get('dataset')
+        const ds =
+          (want ? list.find((d) => String(d.id) === want) : undefined) ??
+          list.find((d) => d.status === 'READY') ??
+          list[0]
         if (!ds) {
           setPhase('nodataset')
           return
