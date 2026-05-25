@@ -117,7 +117,7 @@ func (s *Store) SyncTasks(ctx context.Context, datasetID, batchID int64, pks, ha
 		WITH changed AS (
 			UPDATE tasks t
 			SET status='PENDING', content_hash=i.h, assigned_to=NULL, claimed_at=NULL,
-			    lease_expires_at=NULL, round=t.round+1, updated_at=now()
+			    lease_expires_at=NULL, completed_at=NULL, round=t.round+1, updated_at=now()
 			FROM incoming i
 			WHERE t.dataset_id=$1 AND t.source_row_pk=i.pk AND t.content_hash IS DISTINCT FROM i.h
 			RETURNING t.id
