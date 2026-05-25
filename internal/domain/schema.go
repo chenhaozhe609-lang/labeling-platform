@@ -7,9 +7,9 @@ type ColumnRole string
 
 const (
 	ColContext ColumnRole = "context" // 只读背景；兼作 LLM 预填输入
-	ColFill    ColumnRole = "fill"     // 待补全的标注目标
-	ColHidden  ColumnRole = "hidden"   // 不展示
-	ColID      ColumnRole = "id"       // 主键
+	ColFill    ColumnRole = "fill"    // 待补全的标注目标
+	ColHidden  ColumnRole = "hidden"  // 不展示
+	ColID      ColumnRole = "id"      // 主键
 )
 
 // FieldOption single/multi 选项。

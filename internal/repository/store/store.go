@@ -12,9 +12,10 @@ import (
 )
 
 var (
-	ErrNotFound = errors.New("not found")
-	ErrNoTask   = errors.New("no pending task")  // claim 时池中无 PENDING
-	ErrConflict = errors.New("task state conflict") // submit/heartbeat 时任务已被回收或他人占用
+	ErrNotFound  = errors.New("not found")
+	ErrNoTask    = errors.New("no pending task")     // claim 时池中无 PENDING
+	ErrConflict  = errors.New("task state conflict") // submit/heartbeat 时任务已被回收或他人占用
+	ErrForbidden = errors.New("forbidden")           // 越权：如审核本人提交的标注
 )
 
 // mapNoRows 把 pgx.ErrNoRows 统一转成 ErrNotFound。
@@ -49,7 +50,11 @@ func (s *Store) CreateUser(ctx context.Context, username, passwordHash string, r
 	row := s.pool.QueryRow(ctx,
 		`INSERT INTO users (username, password_hash, role) VALUES ($1, $2, $3) RETURNING `+userCols,
 		username, passwordHash, role)
-	return scanUser(row)
+	u, err := scanUser(row)
+	if isPgCode(err, "23505") { // unique_violation：用户名已存在
+		return nil, ErrConflict
+	}
+	return u, err
 }
 
 func scanUser(row pgx.Row) (*domain.User, error) {

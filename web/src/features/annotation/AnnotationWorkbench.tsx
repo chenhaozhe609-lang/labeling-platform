@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import { CornerDownLeft, Loader2, LogOut, PartyPopper, RefreshCw, SkipForward } from 'lucide-react'
+import { CornerDownLeft, Loader2, LogOut, PartyPopper, Pause, RefreshCw, SkipForward } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Kbd } from '@/components/Kbd'
@@ -30,6 +30,7 @@ export function AnnotationWorkbench() {
   const [bundle, setBundle] = useState<TaskBundle | null>(null)
   const [leaseExpiresAt, setLeaseExpiresAt] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [paused, setPaused] = useState(false)
 
   const [values, setValues] = useState<Values>({})
   const [activeFieldCode, setActiveFieldCode] = useState<string | null>(null)
@@ -112,6 +113,7 @@ export function AnnotationWorkbench() {
       const res = await claimTask(datasetId)
       if (!res.task) {
         setBundle(null)
+        setPaused('paused' in res ? !!res.paused : false)
         setPhase('empty')
         return
       }
@@ -299,10 +301,12 @@ export function AnnotationWorkbench() {
   if (phase === 'empty' || !bundle) {
     return (
       <div className="flex h-svh flex-col items-center justify-center gap-4 bg-background text-center">
-        <PartyPopper className="size-10 text-success" />
+        {paused ? <Pause className="size-10 text-warning" /> : <PartyPopper className="size-10 text-success" />}
         <div>
-          <div className="text-lg font-semibold">该数据集已全部标完</div>
-          <div className="mt-1 text-sm text-muted-foreground">{dataset?.name}</div>
+          <div className="text-lg font-semibold">{paused ? '该数据集已暂停' : '该数据集已全部标完'}</div>
+          <div className="mt-1 text-sm text-muted-foreground">
+            {paused ? `${dataset?.name ?? ''} · 请等管理员恢复后再标` : dataset?.name}
+          </div>
         </div>
         {dataset && (
           <Button variant="secondary" size="sm" onClick={() => claimNext(dataset.id)}>

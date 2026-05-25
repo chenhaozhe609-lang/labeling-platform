@@ -1,0 +1,98 @@
+# 生产编排：构建后端/前端镜像 + meta-db + source-db(沙箱) + redis。
+# 用法（在仓库根目录）：
+#   JWT_SECRET=xxx LLM_API_KEY=sk-xxx \
+#   docker compose -f deployments/docker-compose.prod.yml up -d --build
+#
+# 注意：后端容器内以 SANDBOX_MODE=local 调用 psql/pg_restore（镜像已装 client），
+#       通过 SANDBOX_HOST=source-db 连沙箱库——不依赖宿主 docker socket。
+name: labeling-prod
+
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    # 先迁移再起服务（迁移幂等）。覆盖镜像 ENTRYPOINT，避免 command 被当作 server 的参数。
+    entrypoint: ["sh", "-c"]
+    command: ["/app/server migrate up && exec /app/server"]
+    environment:
+      ENV: prod
+      HTTP_ADDR: ":8090"
+      DATABASE_URL: postgres://labeling:labeling@meta-db:5432/labeling_meta?sslmode=disable
+      SOURCE_DATABASE_URL: postgres://labeling_reader:reader@source-db:5432/sandbox_template?sslmode=disable
+      SOURCE_ADMIN_URL: postgres://postgres:postgres@source-db:5432/sandbox_template?sslmode=disable
+      JWT_SECRET: ${JWT_SECRET:?须设置 JWT_SECRET}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:8080}
+      # 沙箱恢复走本机 psql/pg_restore，连 source-db 服务
+      SANDBOX_MODE: local
+      SANDBOX_HOST: source-db
+      SANDBOX_PORT: "5432"
+      SANDBOX_USER: sandbox_role
+      SANDBOX_PASSWORD: sandbox
+      # LLM 预填（留空则用占位 stub）
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.deepseek.com}
+      LLM_MODEL: ${LLM_MODEL:-deepseek-chat}
+    depends_on:
+      meta-db: { condition: service_healthy }
+      source-db: { condition: service_healthy }
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ../web
+      dockerfile: Dockerfile
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  meta-db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: labeling
+      POSTGRES_PASSWORD: labeling
+      POSTGRES_DB: labeling_meta
+    volumes:
+      - meta_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U labeling -d labeling_meta"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  source-db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: sandbox_template
+    volumes:
+      - source_pgdata:/var/lib/postgresql/data
+      - ./source-init:/docker-entrypoint-initdb.d:ro
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 2g
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d sandbox_template"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+volumes:
+  meta_pgdata:
+  source_pgdata:

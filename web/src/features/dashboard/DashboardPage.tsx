@@ -8,13 +8,13 @@ export function DashboardPage() {
   if (isLoading) return <Pad>加载中…</Pad>
   if (error || !data) return <Pad>看板加载失败（需管理员）</Pad>
 
+  // 任务分布饼图只含真实 task 状态；「打回」是审核动作（任务已回到「待领」），单列指标展示。
   const segments: Segment[] = [
     { value: data.completed, color: 'var(--success)', label: '已完成' },
     { value: data.claimed, color: 'var(--info)', label: '进行中' },
     { value: data.pending, color: 'var(--surface-3)', label: '待领' },
-    { value: data.needs_redo, color: 'var(--destructive)', label: '打回' },
   ].filter((s) => s.value > 0)
-  const totalTasks = data.completed + data.claimed + data.pending + data.needs_redo
+  const totalTasks = data.completed + data.claimed + data.pending
 
   return (
     <div className="mx-auto max-w-5xl px-8 py-8">
@@ -36,10 +36,20 @@ export function DashboardPage() {
           </div>
         </div>
 
-        {/* 今日 */}
+        {/* 今日 + 审核 */}
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-1">
           <StatCard title="今日提交" value={data.today_submitted} unit="条" />
           <StatCard title="今日活跃标注员" value={data.active_today} unit="人" sub={`${data.datasets} 个数据集`} />
+          <StatCard
+            title="审核"
+            value={data.approved}
+            unit="通过"
+            sub={
+              <span className={data.needs_redo > 0 ? 'text-destructive' : undefined}>
+                打回 {data.needs_redo}
+              </span>
+            }
+          />
         </div>
 
         {/* 排行榜 */}

@@ -7,11 +7,11 @@ import (
 	"github.com/chenhaozhe609-lang/labeling-platform/internal/domain"
 )
 
-func (s *Store) CreateImportBatch(ctx context.Context, datasetID int64, fileName string, fileSize int64) (int64, error) {
+func (s *Store) CreateImportBatch(ctx context.Context, datasetID int64, fileName string, fileSize int64, importedBy *int64) (int64, error) {
 	var id int64
 	err := s.pool.QueryRow(ctx,
-		`INSERT INTO import_batches (dataset_id, file_name, file_size_bytes) VALUES ($1,$2,$3) RETURNING id`,
-		datasetID, fileName, fileSize).Scan(&id)
+		`INSERT INTO import_batches (dataset_id, file_name, file_size_bytes, imported_by) VALUES ($1,$2,$3,$4) RETURNING id`,
+		datasetID, fileName, fileSize, importedBy).Scan(&id)
 	return id, err
 }
 

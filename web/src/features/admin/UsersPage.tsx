@@ -1,0 +1,158 @@
+import { useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
+import { Loader2, Trash2, UserPlus } from 'lucide-react'
+import { createUser, deleteUser, listUsers, updateUser } from '@/api/admin'
+import { useAuth } from '@/stores/auth'
+import type { Role } from '@/types'
+
+const ROLES: Role[] = ['annotator', 'reviewer', 'admin']
+const ROLE_LABEL: Record<Role, string> = { admin: '管理员', reviewer: '审核员', annotator: '标注员' }
+
+function errMsg(e: unknown, fallback: string): string {
+  return (e as { response?: { data?: { error?: string } } }).response?.data?.error ?? fallback
+}
+
+export function UsersPage() {
+  const qc = useQueryClient()
+  const meId = useAuth((s) => s.user?.id)
+  const { data, isLoading, error } = useQuery({ queryKey: ['users'], queryFn: listUsers })
+
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [role, setRole] = useState<Role>('annotator')
+
+  const invalidate = () => qc.invalidateQueries({ queryKey: ['users'] })
+
+  const create = useMutation({
+    mutationFn: () => createUser(username.trim(), password, role),
+    onSuccess: () => {
+      toast.success('已创建用户')
+      setUsername('')
+      setPassword('')
+      setRole('annotator')
+      invalidate()
+    },
+    onError: (e) => toast.error(errMsg(e, '创建失败')),
+  })
+
+  const changeRole = useMutation({
+    mutationFn: ({ id, role }: { id: number; role: Role }) => updateUser(id, { role }),
+    onSuccess: () => {
+      toast.success('已更新角色')
+      invalidate()
+    },
+    onError: (e) => toast.error(errMsg(e, '更新失败')),
+  })
+
+  const remove = useMutation({
+    mutationFn: (id: number) => deleteUser(id),
+    onSuccess: () => {
+      toast.success('已删除')
+      invalidate()
+    },
+    onError: (e) => toast.error(errMsg(e, '删除失败')),
+  })
+
+  if (isLoading) return <Pad>加载中…</Pad>
+  if (error || !data) return <Pad>加载失败（需管理员）</Pad>
+
+  const canSubmit = username.trim() !== '' && password.length >= 6
+
+  return (
+    <div className="mx-auto max-w-3xl px-8 py-8">
+      <h1 className="mb-6 text-xl font-semibold tracking-tight">用户管理</h1>
+
+      {/* 新建 */}
+      <section className="mb-6 rounded-lg border border-border bg-card p-4">
+        <div className="mb-3 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">新建用户</div>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            placeholder="用户名"
+            className="h-9 flex-1 rounded-md border border-border bg-surface-1 px-3 text-[13px] outline-none focus:border-primary"
+          />
+          <input
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            type="password"
+            placeholder="密码（≥6位）"
+            className="h-9 flex-1 rounded-md border border-border bg-surface-1 px-3 text-[13px] outline-none focus:border-primary"
+          />
+          <select
+            value={role}
+            onChange={(e) => setRole(e.target.value as Role)}
+            className="h-9 rounded-md border border-border bg-surface-1 px-2 text-[13px] outline-none focus:border-primary"
+          >
+            {ROLES.map((r) => (
+              <option key={r} value={r}>{ROLE_LABEL[r]}</option>
+            ))}
+          </select>
+          <button onClick={() => create.mutate()} disabled={!canSubmit || create.isPending} className="btn-primary">
+            {create.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <UserPlus className="size-3.5" />}
+            创建
+          </button>
+        </div>
+      </section>
+
+      {/* 列表 */}
+      <section className="rounded-lg border border-border bg-card p-4">
+        <table className="w-full text-[13px]">
+          <thead>
+            <tr className="text-left text-[11px] uppercase tracking-wide text-text-tertiary">
+              <th className="pb-2 font-medium">#</th>
+              <th className="pb-2 font-medium">用户名</th>
+              <th className="pb-2 font-medium">角色</th>
+              <th className="pb-2 text-right font-medium">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.map((u) => {
+              const isSelf = u.id === meId
+              return (
+                <tr key={u.id} className="border-t border-border-subtle">
+                  <td className="py-2 font-mono tabular text-text-tertiary">{u.id}</td>
+                  <td className="py-2">
+                    <span className="inline-flex items-center gap-2">
+                      <span className="grid size-6 place-items-center rounded-full bg-surface-2 text-[11px] uppercase">{u.username[0]}</span>
+                      {u.username}
+                      {isSelf && <span className="rounded bg-surface-2 px-1.5 text-[10px] text-text-tertiary">我</span>}
+                    </span>
+                  </td>
+                  <td className="py-2">
+                    <select
+                      value={u.role}
+                      onChange={(e) => changeRole.mutate({ id: u.id, role: e.target.value as Role })}
+                      className="h-7 rounded-md border border-border bg-surface-1 px-2 text-[12px] outline-none focus:border-primary"
+                    >
+                      {ROLES.map((r) => (
+                        <option key={r} value={r}>{ROLE_LABEL[r]}</option>
+                      ))}
+                    </select>
+                  </td>
+                  <td className="py-2 text-right">
+                    <button
+                      onClick={() => {
+                        if (confirm(`删除用户 ${u.username}？`)) remove.mutate(u.id)
+                      }}
+                      disabled={isSelf || remove.isPending}
+                      title={isSelf ? '不能删除自己' : '删除'}
+                      className="inline-grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+                    >
+                      <Trash2 className="size-3.5" />
+                    </button>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </section>
+    </div>
+  )
+}
+
+function Pad({ children }: { children: React.ReactNode }) {
+  return <div className="px-8 py-8 text-sm text-muted-foreground">{children}</div>
+}

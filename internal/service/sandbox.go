@@ -32,3 +32,40 @@ func DropSchema(ctx context.Context, pool *pgxpool.Pool, schema string) error {
 	_, err := pool.Exec(ctx, fmt.Sprintf(`DROP SCHEMA IF EXISTS %s CASCADE`, ident(schema)))
 	return err
 }
+
+// ListSchemas 列出当前用户 schema（排除 pg_*/information_schema）。用于恢复前后快照对比，
+// 发现 dump 自建的 schema（C6.1）。
+func ListSchemas(ctx context.Context, pool *pgxpool.Pool) (map[string]bool, error) {
+	rows, err := pool.Query(ctx,
+		`SELECT nspname FROM pg_namespace WHERE nspname NOT LIKE 'pg\_%' AND nspname <> 'information_schema'`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	set := map[string]bool{}
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			return nil, err
+		}
+		set[n] = true
+	}
+	return set, rows.Err()
+}
+
+// NewSchemas 返回 after 中相对 before 新增的 schema 名。
+func NewSchemas(before, after map[string]bool) []string {
+	var out []string
+	for s := range after {
+		if !before[s] {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// RenameSchema 把 dump 自建的 schema 改名为隔离命名（ds_<id>_v<batch>），保证隔离且避免重名碰撞（C6.1）。
+func RenameSchema(ctx context.Context, pool *pgxpool.Pool, from, to string) error {
+	_, err := pool.Exec(ctx, fmt.Sprintf(`ALTER SCHEMA %s RENAME TO %s`, ident(from), ident(to)))
+	return err
+}

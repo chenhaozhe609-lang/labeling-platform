@@ -3,12 +3,14 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { Toaster } from '@/components/ui/sonner'
 import { AppShell } from '@/components/AppShell'
 import { AnnotationWorkbench } from '@/features/annotation/AnnotationWorkbench'
+import { ReviewPage } from '@/features/review/ReviewPage'
 import { LoginPage } from '@/features/auth/LoginPage'
 import { DatasetsListPage } from '@/features/dataset/DatasetsListPage'
 import { UploadPage } from '@/features/dataset/UploadPage'
 import { DatasetDetailPage } from '@/features/dataset/DatasetDetailPage'
 import { SchemaEditorPage } from '@/features/dataset/SchemaEditorPage'
 import { DashboardPage } from '@/features/dashboard/DashboardPage'
+import { UsersPage } from '@/features/admin/UsersPage'
 import { queryClient } from '@/lib/query'
 import { useAuth } from '@/stores/auth'
 
@@ -35,6 +37,16 @@ function App() {
             }
           />
 
+          {/* 沉浸区：审核抽检台（无外壳） */}
+          <Route
+            path="/review"
+            element={
+              <RequireAuth>
+                <ReviewPage />
+              </RequireAuth>
+            }
+          />
+
           {/* 管理区：带 Activity Rail 外壳 */}
           <Route
             element={
@@ -48,6 +60,7 @@ function App() {
             <Route path="/datasets/:id" element={<DatasetDetailPage />} />
             <Route path="/datasets/:id/schema" element={<SchemaEditorPage />} />
             <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="/admin/users" element={<UsersPage />} />
           </Route>
 
           <Route path="/" element={<Navigate to="/datasets" replace />} />

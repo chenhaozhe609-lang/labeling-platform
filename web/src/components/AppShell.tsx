@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { ChevronDown, Database, LayoutDashboard, LogOut, PenLine, Search, Settings2 } from 'lucide-react'
+import { ChevronDown, ClipboardCheck, Database, LayoutDashboard, LogOut, PenLine, Search, Settings2, Users } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/stores/auth'
 import { listDatasets } from '@/api/datasets'
@@ -17,10 +17,12 @@ const NAV: Record<Role, NavItem[]> = {
   admin: [
     { to: '/dashboard', label: '总览', icon: LayoutDashboard },
     { to: '/datasets', label: '数据集', icon: Database },
+    { to: '/review', label: '审核', icon: ClipboardCheck },
+    { to: '/admin/users', label: '用户', icon: Users },
   ],
   reviewer: [
+    { to: '/review', label: '审核', icon: ClipboardCheck },
     { to: '/datasets', label: '数据集', icon: Database },
-    { to: '/workspace', label: '标注', icon: PenLine },
   ],
   annotator: [
     { to: '/workspace', label: '标注', icon: PenLine },

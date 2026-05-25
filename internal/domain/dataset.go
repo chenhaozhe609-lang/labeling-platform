@@ -26,6 +26,7 @@ type Dataset struct {
 	FormSchemaVersion int             `json:"form_schema_version"`
 	Status            DatasetStatus   `json:"status"`
 	TotalRows         int             `json:"total_rows"`
+	CreatedBy         *int64          `json:"created_by,omitempty"`
 	CreatedAt         time.Time       `json:"created_at"`
 }
 

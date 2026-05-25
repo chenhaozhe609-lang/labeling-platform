@@ -128,3 +128,21 @@ export interface AnnotationHistory {
   created_at: string
   superseded: boolean
 }
+
+// ---- 审核（reviewer 抽检台，C5.1/5.2）----
+export interface ReviewItem {
+  annotation_id: number
+  task_id: number
+  source_row_pk: string
+  round: number
+  annotator: string
+  created_at: string
+  data: AnnotationData // 标注员补全的 fills + _source
+  source_row: Record<string, unknown>
+}
+export interface ReviewQueueResponse {
+  dataset_name: string
+  form_schema: FormSchema
+  pending_total: number // 抽检池总量（去重 limit 后的可审条数）
+  items: ReviewItem[]
+}

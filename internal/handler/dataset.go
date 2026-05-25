@@ -61,15 +61,17 @@ func (h *DatasetHandler) Upload(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
+	uid := userID(c)
 	dsID, err := h.store.CreateDataset(ctx, &domain.Dataset{
 		Name: name, SourceSchema: "", SourceTable: "", SourcePKColumn: "",
 		FormSchema: json.RawMessage("{}"), FormSchemaVersion: 1, Status: domain.StatusImporting,
+		CreatedBy: &uid,
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建数据集失败"})
 		return
 	}
-	batchID, err := h.store.CreateImportBatch(ctx, dsID, fh.Filename, fh.Size)
+	batchID, err := h.store.CreateImportBatch(ctx, dsID, fh.Filename, fh.Size, &uid)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建批次失败"})
 		return
@@ -98,11 +100,45 @@ func (h *DatasetHandler) Upload(c *gin.Context) {
 	h.respondDetail(c, dsID)
 }
 
-func (h *DatasetHandler) runImport(ctx context.Context, dsID, batchID int64, schema, dumpPath string, custom bool) error {
-	if err := service.CreateSchema(ctx, h.srcAdmin, schema); err != nil {
-		return fmt.Errorf("建 schema: %w", err)
+// restoreIntoSchema 以受限角色恢复 dump（dump 自建其 schema），随后快照对比发现该 schema，
+// 改名为隔离命名 schema（C6.1）。成功返回后 schema 已存在且为本次 dump 的唯一产物。
+func (h *DatasetHandler) restoreIntoSchema(ctx context.Context, schema, dumpPath string, custom bool) error {
+	before, err := service.ListSchemas(ctx, h.srcAdmin)
+	if err != nil {
+		return fmt.Errorf("快照 schema: %w", err)
 	}
-	if err := h.restorer.Restore(ctx, schema, dumpPath, custom); err != nil {
+	if err := h.restorer.Restore(ctx, dumpPath, custom); err != nil {
+		// 失败恢复可能已建出 schema（如恶意语句中途被拒）——清理掉，避免泄漏。
+		if after, e := service.ListSchemas(ctx, h.srcAdmin); e == nil {
+			for _, s := range service.NewSchemas(before, after) {
+				_ = service.DropSchema(ctx, h.srcAdmin, s)
+			}
+		}
+		return err
+	}
+	after, err := service.ListSchemas(ctx, h.srcAdmin)
+	if err != nil {
+		return fmt.Errorf("快照 schema: %w", err)
+	}
+	created := service.NewSchemas(before, after)
+	if len(created) != 1 {
+		for _, s := range created {
+			_ = service.DropSchema(ctx, h.srcAdmin, s) // 清理本次恢复产物
+		}
+		if len(created) == 0 {
+			return fmt.Errorf("dump 未创建独立 schema（请用 `pg_dump -n <schema>` 导出带 schema 的备份，暂不支持仅 public 的 dump）")
+		}
+		return fmt.Errorf("dump 含 %d 个 schema，暂仅支持单 schema 备份", len(created))
+	}
+	if err := service.RenameSchema(ctx, h.srcAdmin, created[0], schema); err != nil {
+		_ = service.DropSchema(ctx, h.srcAdmin, created[0])
+		return fmt.Errorf("规范化隔离 schema: %w", err)
+	}
+	return nil
+}
+
+func (h *DatasetHandler) runImport(ctx context.Context, dsID, batchID int64, schema, dumpPath string, custom bool) error {
+	if err := h.restoreIntoSchema(ctx, schema, dumpPath, custom); err != nil {
 		return err
 	}
 	table, err := service.DetectTable(ctx, h.srcAdmin, schema)
@@ -157,7 +193,8 @@ func (h *DatasetHandler) GenerateTasks(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "扫描待补全行失败: " + err.Error()})
 		return
 	}
-	batchID, err := h.store.CreateImportBatch(ctx, id, "(generate-tasks)", 0)
+	uid := userID(c)
+	batchID, err := h.store.CreateImportBatch(ctx, id, "(generate-tasks)", 0, &uid)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建批次失败"})
 		return
@@ -211,7 +248,8 @@ func (h *DatasetHandler) Sync(c *gin.Context) {
 		return
 	}
 
-	batchID, err := h.store.CreateImportBatch(ctx, id, fh.Filename, fh.Size)
+	uid := userID(c)
+	batchID, err := h.store.CreateImportBatch(ctx, id, fh.Filename, fh.Size, &uid)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建批次失败"})
 		return
@@ -241,10 +279,7 @@ func (h *DatasetHandler) Sync(c *gin.Context) {
 }
 
 func (h *DatasetHandler) runSync(ctx context.Context, ds *domain.Dataset, batchID int64, newSchema, dumpPath string, custom bool) error {
-	if err := service.CreateSchema(ctx, h.srcAdmin, newSchema); err != nil {
-		return fmt.Errorf("建 schema: %w", err)
-	}
-	if err := h.restorer.Restore(ctx, newSchema, dumpPath, custom); err != nil {
+	if err := h.restoreIntoSchema(ctx, newSchema, dumpPath, custom); err != nil {
 		return err
 	}
 	// v2：同步只针对「任务行」（有空 fill 列）——与 generate-tasks 规则一致，
@@ -285,6 +320,43 @@ func (h *DatasetHandler) runSync(ctx context.Context, ds *domain.Dataset, batchI
 		_ = service.DropSchema(ctx, h.srcAdmin, old) // 切换后清旧版本，失败不致命
 	}
 	return nil
+}
+
+// Pause 暂停数据集（admin，C5.5）：READY → PAUSED，暂停后不再放任务。
+func (h *DatasetHandler) Pause(c *gin.Context) {
+	h.toggleStatus(c, true)
+}
+
+// Resume 恢复数据集（admin，C5.5）：PAUSED → READY。
+func (h *DatasetHandler) Resume(c *gin.Context) {
+	h.toggleStatus(c, false)
+}
+
+func (h *DatasetHandler) toggleStatus(c *gin.Context, pause bool) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "非法 id"})
+		return
+	}
+	ctx := c.Request.Context()
+	if pause {
+		err = h.store.PauseDataset(ctx, id)
+	} else {
+		err = h.store.ResumeDataset(ctx, id)
+	}
+	if errors.Is(err, store.ErrConflict) {
+		msg := "仅 PAUSED 数据集可恢复"
+		if pause {
+			msg = "仅 READY 数据集可暂停"
+		}
+		c.JSON(http.StatusConflict, gin.H{"error": msg})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "操作失败"})
+		return
+	}
+	h.respondDetail(c, id)
 }
 
 // Dashboard 全局看板聚合（admin）。

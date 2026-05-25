@@ -119,11 +119,26 @@ func runServer(cfg config.Config) {
 	jm := jwtpkg.NewManager(cfg.JWTSecret, cfg.AccessTTL, cfg.RefreshTTL)
 	restorer := pgrestore.New(pgrestore.Config{
 		Mode: cfg.SandboxMode, Container: cfg.SandboxContainer, DB: cfg.SandboxDB,
+		Host: cfg.SandboxHost, Port: cfg.SandboxPort,
 		User: cfg.SandboxUser, Password: cfg.SandboxPassword, Timeout: cfg.RestoreTimeout,
 	})
 	authH := handler.NewAuthHandler(st, jm)
-	taskH := handler.NewTaskHandler(st, src, service.StubPrefiller{}, cfg.LeaseMinutes)
+
+	// LLM 预填：配了 key 用真模型（DeepSeek 等 OpenAI 兼容），否则回退占位 stub（PRD §24.5）。
+	var prefiller service.Prefiller = service.StubPrefiller{}
+	if cfg.LLMAPIKey != "" {
+		prefiller = service.NewLLMPrefiller(service.LLMConfig{
+			BaseURL: cfg.LLMBaseURL, APIKey: cfg.LLMAPIKey, Model: cfg.LLMModel, Timeout: cfg.LLMTimeout,
+		})
+		slog.Info("LLM 预填已启用", "model", cfg.LLMModel, "base", cfg.LLMBaseURL)
+	} else {
+		slog.Info("LLM 预填未配置，使用占位 StubPrefiller（设 LLM_API_KEY 启用）")
+	}
+	taskH := handler.NewTaskHandler(st, src, prefiller, cfg.LeaseMinutes)
 	datasetH := handler.NewDatasetHandler(st, srcAdminPool, restorer, cfg.UploadDir, cfg.UploadMaxBytes, "labeling_reader")
+	reviewH := handler.NewReviewHandler(st, src)
+	exportH := handler.NewExportHandler(st, src)
+	userH := handler.NewUserHandler(st)
 
 	rootCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -155,8 +170,17 @@ func runServer(cfg config.Config) {
 		authed.POST("/datasets", middleware.RequireRole(domain.RoleAdmin), datasetH.Upload)
 		authed.POST("/datasets/:id/sync", middleware.RequireRole(domain.RoleAdmin), datasetH.Sync)
 		authed.POST("/datasets/:id/generate-tasks", middleware.RequireRole(domain.RoleAdmin), datasetH.GenerateTasks)
+		authed.POST("/datasets/:id/pause", middleware.RequireRole(domain.RoleAdmin), datasetH.Pause)
+		authed.POST("/datasets/:id/resume", middleware.RequireRole(domain.RoleAdmin), datasetH.Resume)
 		authed.PUT("/datasets/:id/form-schema", middleware.RequireRole(domain.RoleAdmin), datasetH.UpdateFormSchema)
+		authed.GET("/datasets/:id/export", middleware.RequireRole(domain.RoleAdmin, domain.RoleReviewer), exportH.Export)
 		authed.GET("/admin/dashboard", middleware.RequireRole(domain.RoleAdmin), datasetH.Dashboard)
+
+		adminUsers := authed.Group("/admin/users", middleware.RequireRole(domain.RoleAdmin))
+		adminUsers.GET("", userH.List)
+		adminUsers.POST("", userH.Create)
+		adminUsers.PATCH("/:id", userH.Update)
+		adminUsers.DELETE("/:id", userH.Delete)
 
 		tasks := authed.Group("/tasks")
 		tasks.POST("/claim", taskH.Claim)
@@ -164,6 +188,11 @@ func runServer(cfg config.Config) {
 		tasks.POST("/:id/heartbeat", taskH.Heartbeat)
 		tasks.POST("/:id/submit", taskH.Submit)
 		tasks.POST("/:id/release", taskH.Release)
+
+		reviews := authed.Group("/reviews")
+		reviews.Use(middleware.RequireRole(domain.RoleReviewer, domain.RoleAdmin))
+		reviews.GET("/queue", reviewH.Queue)
+		reviews.POST("/:id/decision", reviewH.Decision)
 	}
 
 	srv := &http.Server{Addr: cfg.HTTPAddr, Handler: r}

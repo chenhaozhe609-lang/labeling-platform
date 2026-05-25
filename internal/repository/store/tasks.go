@@ -32,6 +32,7 @@ func (s *Store) ClaimTask(ctx context.Context, datasetID, userID int64, leaseMin
 		WITH next AS (
 			SELECT id FROM tasks
 			WHERE dataset_id = $1 AND status = 'PENDING'
+			  AND EXISTS (SELECT 1 FROM datasets d WHERE d.id = $1 AND d.status = 'READY') -- 暂停/未就绪不放任务
 			ORDER BY id
 			LIMIT 1
 			FOR UPDATE SKIP LOCKED

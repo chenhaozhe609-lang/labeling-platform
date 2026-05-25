@@ -69,6 +69,11 @@ func (h *TaskHandler) Claim(c *gin.Context) {
 	}
 	t, err := h.store.ClaimTask(c.Request.Context(), req.DatasetID, userID(c), h.leaseMin)
 	if errors.Is(err, store.ErrNoTask) {
+		// 区分「暂停」与「真没任务」：暂停时给前端明确标志。
+		if ds, e := h.store.GetDataset(c.Request.Context(), req.DatasetID); e == nil && ds.Status == domain.StatusPaused {
+			c.JSON(http.StatusOK, gin.H{"task": nil, "paused": true})
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{"task": nil})
 		return
 	}

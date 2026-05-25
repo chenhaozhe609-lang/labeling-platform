@@ -1,0 +1,13 @@
+# 后端构建上下文：只要 go 源码 + migrations，排除前端/产物/本地资料。
+web/
+.git/
+.github/
+planning/
+bin/
+deployments/
+*.md
+.env
+.env.*
+!.env.example
+.vscode/
+.idea/

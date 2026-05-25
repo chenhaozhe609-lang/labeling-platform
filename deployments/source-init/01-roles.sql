@@ -10,9 +10,19 @@ CREATE ROLE sandbox_role LOGIN PASSWORD 'sandbox'
 CREATE ROLE labeling_reader LOGIN PASSWORD 'reader'
     NOSUPERUSER NOCREATEDB NOCREATEROLE;
 
-GRANT CONNECT ON DATABASE sandbox_template TO sandbox_role, labeling_reader;
+-- ── 最小权限收紧（C6.1/C6.2）────────────────────────────────────────────
+-- 跨库隔离：移除 PUBLIC 在维护库上的默认 CONNECT，沙箱/只读角色只能连 sandbox_template。
+REVOKE CONNECT ON DATABASE postgres  FROM PUBLIC;
+REVOKE CONNECT ON DATABASE template1 FROM PUBLIC;
 
--- 恢复时需要在 sandbox_template 里建独立 schema
+-- sandbox_template 仅显式角色可连（去掉 PUBLIC 默认 CONNECT）。
+REVOKE CONNECT ON DATABASE sandbox_template FROM PUBLIC;
+GRANT  CONNECT ON DATABASE sandbox_template TO sandbox_role, labeling_reader;
+
+-- 恢复时需要在 sandbox_template 里建独立 schema（仅 sandbox_role，且不出本库）。
 GRANT CREATE ON DATABASE sandbox_template TO sandbox_role;
-GRANT USAGE, CREATE ON SCHEMA public TO sandbox_role;
-GRANT USAGE ON SCHEMA public TO labeling_reader;
+
+-- public schema：任何角色都不得在此建对象（每个数据集走独立隔离 schema）。
+-- reader 不碰 public，仅在恢复完成后由后端按 schema 授予 SELECT（见 GrantReader）。
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+REVOKE ALL    ON SCHEMA public FROM labeling_reader;

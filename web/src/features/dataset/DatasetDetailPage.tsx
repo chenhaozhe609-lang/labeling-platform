@@ -1,15 +1,18 @@
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import { ArrowLeft, ListPlus, Loader2, PenLine, RefreshCw, Settings2 } from 'lucide-react'
-import { generateTasks, getDatasetDetail, syncDataset } from '@/api/datasets'
+import { ArrowLeft, Download, ListPlus, Loader2, Pause, PenLine, Play, RefreshCw, Settings2 } from 'lucide-react'
+import { exportDataset, generateTasks, getDatasetDetail, pauseDataset, resumeDataset, syncDataset } from '@/api/datasets'
 import { useAuth } from '@/stores/auth'
 
 export function DatasetDetailPage() {
   const { id } = useParams<{ id: string }>()
   const dsId = Number(id)
-  const isAdmin = useAuth((s) => s.user?.role === 'admin')
+  const role = useAuth((s) => s.user?.role)
+  const isAdmin = role === 'admin'
+  const canExport = role === 'admin' || role === 'reviewer'
+  const [exporting, setExporting] = useState<'jsonl' | 'csv' | null>(null)
   const qc = useQueryClient()
   const fileRef = useRef<HTMLInputElement>(null)
   const { data, isLoading, error } = useQuery({
@@ -37,6 +40,28 @@ export function DatasetDetailPage() {
     },
     onError: () => toast.error('生成任务失败（需先配置补全列）'),
   })
+
+  const toggle = useMutation({
+    mutationFn: (pause: boolean) => (pause ? pauseDataset(dsId) : resumeDataset(dsId)),
+    onSuccess: (d) => {
+      qc.invalidateQueries({ queryKey: ['dataset', dsId] })
+      qc.invalidateQueries({ queryKey: ['datasets'] })
+      toast.success(d.dataset.status === 'PAUSED' ? '已暂停' : '已恢复')
+    },
+    onError: () => toast.error('操作失败'),
+  })
+
+  async function doExport(format: 'jsonl' | 'csv') {
+    setExporting(format)
+    try {
+      await exportDataset(dsId, format)
+      toast.success(`已导出 ${format.toUpperCase()}`)
+    } catch {
+      toast.error('导出失败')
+    } finally {
+      setExporting(null)
+    }
+  }
 
   if (isLoading) return <Pad>加载中…</Pad>
   if (error || !data) return <Pad>加载失败</Pad>
@@ -80,6 +105,22 @@ export function DatasetDetailPage() {
                 {sync.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
                 同步新版本
               </button>
+              {(d.status === 'READY' || d.status === 'PAUSED') && (
+                <button
+                  onClick={() => toggle.mutate(d.status === 'READY')}
+                  disabled={toggle.isPending}
+                  className="btn-ghost"
+                >
+                  {toggle.isPending ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : d.status === 'READY' ? (
+                    <Pause className="size-3.5" />
+                  ) : (
+                    <Play className="size-3.5" />
+                  )}
+                  {d.status === 'READY' ? '暂停' : '恢复'}
+                </button>
+              )}
               <Link to={`/datasets/${dsId}/schema`} className="btn-ghost">
                 <Settings2 className="size-3.5" />
                 编辑字段
@@ -108,6 +149,20 @@ export function DatasetDetailPage() {
           <span>待领 {progress.pending}</span>
           <span>进行 {progress.claimed}</span>
         </div>
+
+        {canExport && progress.completed > 0 && (
+          <div className="mt-3 flex items-center gap-2 border-t border-border-subtle pt-3">
+            <span className="text-[12px] text-text-tertiary">导出补全后的表</span>
+            <button onClick={() => doExport('jsonl')} disabled={exporting !== null} className="btn-ghost ml-auto">
+              {exporting === 'jsonl' ? <Loader2 className="size-3.5 animate-spin" /> : <Download className="size-3.5" />}
+              JSONL
+            </button>
+            <button onClick={() => doExport('csv')} disabled={exporting !== null} className="btn-ghost">
+              {exporting === 'csv' ? <Loader2 className="size-3.5 animate-spin" /> : <Download className="size-3.5" />}
+              CSV
+            </button>
+          </div>
+        )}
       </section>
 
       {/* 列角色概览 */}

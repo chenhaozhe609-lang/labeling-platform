@@ -39,6 +39,33 @@ func (r *Reader) GetRow(ctx context.Context, schema, table, pkCol, pk string) (m
 	return m, nil
 }
 
+// GetRows 一次取多个 pk 对应行，按 pk 文本（与 source_row_pk 同样的 CAST(... AS text)）键返回。
+// 供审核台一次性拉取整页队列的源行，避免逐条往返 source-db。无匹配的 pk 不出现在结果中。
+func (r *Reader) GetRows(ctx context.Context, schema, table, pkCol string, pks []string) (map[string]map[string]any, error) {
+	out := make(map[string]map[string]any, len(pks))
+	if len(pks) == 0 {
+		return out, nil
+	}
+	q := fmt.Sprintf(`SELECT *, CAST(%s AS text) AS __pk FROM %s.%s WHERE CAST(%s AS text) = ANY($1::text[])`,
+		ident(pkCol), ident(schema), ident(table), ident(pkCol))
+
+	rows, err := r.pool.Query(ctx, q, pks)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ms, err := pgx.CollectRows(rows, pgx.RowToMap)
+	if err != nil {
+		return nil, err
+	}
+	for _, m := range ms {
+		key, _ := m["__pk"].(string)
+		delete(m, "__pk") // 内部对齐键，不外泄
+		out[key] = m
+	}
+	return out, nil
+}
+
 // ident 转义并双引号包裹标识符。
 func ident(s string) string {
 	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`

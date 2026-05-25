@@ -23,7 +23,8 @@ type DashboardData struct {
 	Pending        int           `json:"pending"`
 	Claimed        int           `json:"claimed"`
 	Completed      int           `json:"completed"`
-	NeedsRedo      int           `json:"needs_redo"`
+	Approved       int           `json:"approved"`   // 审核通过的标注数（累计）
+	NeedsRedo      int           `json:"needs_redo"`  // 被审核打回的标注数（累计）；非 task 状态
 	TodaySubmitted int           `json:"today_submitted"`
 	ActiveToday    int           `json:"active_today"`
 	Leaderboard    []LeaderRow   `json:"leaderboard"`
@@ -56,8 +57,7 @@ func (s *Store) GetDashboard(ctx context.Context) (*DashboardData, error) {
 			d.Claimed = n
 		case "COMPLETED":
 			d.Completed = n
-		case "NEEDS_REDO":
-			d.NeedsRedo = n
+			// NEEDS_REDO 不作为 task 状态出现（打回走「回 PENDING」）；打回量改由 annotations.review_status 统计，见下。
 		}
 	}
 	rows.Close()
@@ -69,6 +69,12 @@ func (s *Store) GetDashboard(ctx context.Context) (*DashboardData, error) {
 		`SELECT count(*) FROM annotations WHERE created_at >= current_date`).Scan(&d.TodaySubmitted)
 	_ = s.pool.QueryRow(ctx,
 		`SELECT count(DISTINCT user_id) FROM annotations WHERE created_at >= current_date`).Scan(&d.ActiveToday)
+
+	// 审核情况（累计）：approved / needs_redo 来自 annotations.review_status，而非 task 状态。
+	_ = s.pool.QueryRow(ctx, `
+		SELECT count(*) FILTER (WHERE review_status = 'approved'),
+		       count(*) FILTER (WHERE review_status = 'needs_redo')
+		FROM annotations`).Scan(&d.Approved, &d.NeedsRedo)
 
 	lb, err := s.pool.Query(ctx, `
 		SELECT a.user_id, u.username, count(*) AS n
