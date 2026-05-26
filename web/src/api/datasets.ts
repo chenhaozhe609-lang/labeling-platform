@@ -65,10 +65,12 @@ export async function exportDataset(
 export async function updateFormSchema(
   id: number,
   formSchema: FormSchema,
+  confirm = false,
 ): Promise<{ form_schema_version: number }> {
   const { data } = await api.put<{ form_schema_version: number }>(
     `/datasets/${id}/form-schema`,
     formSchema,
+    confirm ? { params: { confirm: true } } : undefined,
   )
   return data
 }

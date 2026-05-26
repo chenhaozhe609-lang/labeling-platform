@@ -137,6 +137,16 @@ func (s *Store) SyncTasks(ctx context.Context, datasetID, batchID int64, pks, ha
 	return newCount, updatedCount, nil
 }
 
+// CountActiveAnnotations 数据集下有效（未 superseded）标注数，用于破坏性变更提示。
+func (s *Store) CountActiveAnnotations(ctx context.Context, datasetID int64) (int, error) {
+	var n int
+	err := s.pool.QueryRow(ctx, `
+		SELECT count(*) FROM annotations a
+		JOIN tasks t ON t.id = a.task_id
+		WHERE t.dataset_id=$1 AND a.superseded_at IS NULL`, datasetID).Scan(&n)
+	return n, err
+}
+
 func (s *Store) GetDatasetProgress(ctx context.Context, id int64) (pending, claimed, completed int, err error) {
 	err = s.pool.QueryRow(ctx, `
 		SELECT

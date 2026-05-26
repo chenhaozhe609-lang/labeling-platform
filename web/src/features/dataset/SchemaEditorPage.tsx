@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { ArrowLeft, Loader2, Plus, Trash2 } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Loader2, Plus, Trash2 } from 'lucide-react'
 import { getDatasetDetail, updateFormSchema } from '@/api/datasets'
 import { queryClient } from '@/lib/query'
 import { PageHeader } from '@/components/PageHeader'
@@ -26,6 +26,7 @@ export function SchemaEditorPage() {
 
   const [cols, setCols] = useState<ColumnSpec[]>([])
   const [saving, setSaving] = useState(false)
+  const [confirm, setConfirm] = useState<{ changes: string[]; affected: number } | null>(null)
 
   useEffect(() => {
     if (data) setCols(data.dataset.form_schema?.columns ?? [])
@@ -58,16 +59,21 @@ export function SchemaEditorPage() {
     fillCount > 0 &&
     cols.every((c) => c.role !== 'fill' || c.field?.kind !== 'single' || (c.field.options?.length ?? 0) > 0)
 
-  async function save() {
+  async function doSave(force = false) {
     setSaving(true)
     try {
       const fs = { ...data!.dataset.form_schema, columns: cols }
-      const res = await updateFormSchema(dsId, fs)
+      const res = await updateFormSchema(dsId, fs, force)
       toast.success(`已保存 · form_schema v${res.form_schema_version}（记得「生成任务」）`)
       queryClient.invalidateQueries({ queryKey: ['dataset', dsId] })
       nav(`/datasets/${dsId}`)
-    } catch {
-      toast.error('保存失败')
+    } catch (e) {
+      const r = (e as { response?: { status?: number; data?: { destructive?: string[]; affected?: number } } }).response
+      if (r?.status === 409 && r.data?.destructive?.length) {
+        setConfirm({ changes: r.data.destructive, affected: r.data.affected ?? 0 })
+      } else {
+        toast.error('保存失败')
+      }
     } finally {
       setSaving(false)
     }
@@ -150,13 +156,45 @@ export function SchemaEditorPage() {
       </div>
 
       <div className="mt-6 flex items-center gap-2">
-        <Button onClick={save} disabled={!valid || saving}>
+        <Button onClick={() => doSave(false)} disabled={!valid || saving}>
           {saving && <Loader2 className="size-4 animate-spin" />}
           保存
         </Button>
         <Link to={`/datasets/${dsId}`} className="btn-ghost">取消</Link>
         {fillCount === 0 && <span className="text-[12px] text-warning">至少需要一个「补全」列</span>}
       </div>
+
+      {confirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setConfirm(null)}>
+          <div className="w-full max-w-md rounded-lg border border-border bg-popover p-5 shadow-lg" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 text-warning">
+              <AlertTriangle className="size-4" />
+              <h2 className="text-sm font-semibold text-foreground">破坏性变更确认</h2>
+            </div>
+            <p className="mt-2 text-[13px] text-muted-foreground">
+              以下改动会让该数据集已有的 <b className="text-foreground">{confirm.affected}</b> 条标注失配（旧值对不上新结构）：
+            </p>
+            <ul className="mt-3 flex flex-col gap-1.5 rounded-md border border-border-subtle bg-card/50 p-3 text-[13px]">
+              {confirm.changes.map((c, i) => (
+                <li key={i} className="flex gap-2 text-foreground">
+                  <span className="text-warning">·</span>
+                  {c}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-3 text-[12px] text-text-tertiary">旧标注会保留为历史，但不再与当前结构对应。确认要保存吗？</p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button onClick={() => setConfirm(null)} className="btn-ghost">取消</button>
+              <button
+                onClick={() => { setConfirm(null); void doSave(true) }}
+                className="inline-flex items-center gap-1.5 rounded-md bg-destructive px-3 py-1.5 text-[13px] font-medium text-destructive-foreground hover:opacity-90"
+              >
+                仍要保存
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

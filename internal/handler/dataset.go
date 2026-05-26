@@ -424,12 +424,30 @@ func (h *DatasetHandler) UpdateFormSchema(c *gin.Context) {
 	}
 	ctx := c.Request.Context()
 	// 越权护栏：先确认数据集属于本组织。
-	if _, err = h.store.GetDataset(ctx, id, ctxOrg(c)); errors.Is(err, store.ErrNotFound) {
+	ds, err := h.store.GetDataset(ctx, id, ctxOrg(c))
+	if errors.Is(err, store.ErrNotFound) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "数据集不存在"})
 		return
 	} else if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询失败"})
 		return
+	}
+	// P2 破坏性变更防护：删/改 fill 列会让已有标注失配，需显式确认（?confirm=true）。
+	newFS, perr := domain.ParseFormSchema(json.RawMessage(body))
+	if perr != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "form_schema 结构非法"})
+		return
+	}
+	if oldFS, oerr := domain.ParseFormSchema(ds.FormSchema); oerr == nil {
+		if changes := domain.DestructiveChanges(oldFS, newFS); len(changes) > 0 && c.Query("confirm") != "true" {
+			affected, _ := h.store.CountActiveAnnotations(ctx, id)
+			c.JSON(http.StatusConflict, gin.H{
+				"error":       "存在破坏性变更，确认后再保存",
+				"destructive": changes,
+				"affected":    affected,
+			})
+			return
+		}
 	}
 	v, err := h.store.UpdateFormSchema(ctx, id, json.RawMessage(body))
 	if errors.Is(err, store.ErrNotFound) {
