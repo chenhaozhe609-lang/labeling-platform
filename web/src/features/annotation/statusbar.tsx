@@ -61,26 +61,26 @@ export function AutosaveIndicator({ state }: { state: SaveState }) {
   )
 }
 
+// 仅列实际实现的快捷键（与 AnnotationWorkbench.keyHandler 一致）。
 const HINTS: Record<FocusContext, Array<[string, string]>> = {
   reading: [
-    ['1-4', '选项'],
-    ['Q W E R', '快速标签'],
+    ['Tab', '进入/切换字段'],
+    ['1-9', '选项'],
     ['↵', '提交并下一条'],
-    ['Space', '展开详情'],
-    ['Tab', '下一字段'],
+    ['J / K', '滚动正文'],
     ['S', '跳过'],
-    ['?', '帮助'],
   ],
   widget: [
-    ['1-9', '选当前项'],
-    ['Tab', '下一字段'],
+    ['Tab / ⇧Tab', '切换字段'],
+    ['1-9', '选/切选项'],
+    ['⌫', '清空'],
+    ['⌘A', '采纳 AI'],
     ['↵', '提交'],
-    ['Esc', '取消聚焦'],
   ],
   field: [
+    ['Tab', '下一字段'],
     ['⌘↵', '提交'],
     ['Esc', '退出输入'],
-    ['⌘A', '采纳 AI'],
   ],
 }
 
@@ -93,8 +93,8 @@ export function ShortcutHintBar({ context }: { context: FocusContext }) {
           {label}
         </span>
       ))}
-      <span className="ml-auto flex shrink-0 items-center gap-1.5">
-        <Kbd>⌘K</Kbd>命令
+      <span className="ml-auto flex shrink-0 items-center gap-1.5 text-text-tertiary/70">
+        <Kbd>?</Kbd>全部快捷键
       </span>
     </div>
   )
