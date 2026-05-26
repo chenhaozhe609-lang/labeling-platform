@@ -1,4 +1,4 @@
-import { ClipboardCheck, Database, LayoutDashboard, ListTodo, PenLine, Users } from 'lucide-react'
+import { Building2, ClipboardCheck, Database, LayoutDashboard, ListTodo, PenLine, Users } from 'lucide-react'
 import type { Role } from '@/types'
 
 // 每个角色的侧栏/命令面板导航项（AppShell 与 CommandPalette 共用，避免漂移）。
@@ -26,5 +26,8 @@ export const NAV: Record<Role, NavItem[]> = {
     { to: '/datasets', label: '数据集', icon: Database },
   ],
 }
+
+// 平台超管导航（跨组织，不属于任何业务组织）。
+export const SUPERADMIN_NAV: NavItem[] = [{ to: '/platform/orgs', label: '组织', icon: Building2 }]
 
 export const ROLE_LABEL: Record<Role, string> = { admin: '管理员', reviewer: '审核员', annotator: '标注员' }

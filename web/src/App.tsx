@@ -6,6 +6,9 @@ import { AppShell } from '@/components/AppShell'
 import { AnnotationWorkbench } from '@/features/annotation/AnnotationWorkbench'
 import { ReviewPage } from '@/features/review/ReviewPage'
 import { LoginPage } from '@/features/auth/LoginPage'
+import { SignupPage } from '@/features/auth/SignupPage'
+import { AcceptInvitePage } from '@/features/auth/AcceptInvitePage'
+import { PlatformOrgsPage } from '@/features/platform/PlatformOrgsPage'
 import { DatasetsListPage } from '@/features/dataset/DatasetsListPage'
 import { UploadPage } from '@/features/dataset/UploadPage'
 import { DatasetDetailPage } from '@/features/dataset/DatasetDetailPage'
@@ -28,6 +31,8 @@ function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/signup" element={<SignupPage />} />
+          <Route path="/accept-invite" element={<AcceptInvitePage />} />
 
           {/* 沉浸区：标注工作台（无外壳） */}
           <Route
@@ -63,6 +68,7 @@ function App() {
             <Route path="/datasets/:id/schema" element={<SchemaEditorPage />} />
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/admin/users" element={<UsersPage />} />
+            <Route path="/platform/orgs" element={<PlatformOrgsPage />} />
             <Route path="/me/tasks" element={<MyTasksPage />} />
           </Route>
 

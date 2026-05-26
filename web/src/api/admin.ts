@@ -1,14 +1,19 @@
 import { api } from './client'
-import type { Role, User } from '@/types'
+import type { Invite, Role, User } from '@/types'
 
-// ---- 用户管理（admin，C5.4b）----
+// ---- 用户管理（admin，C5.4b；多租户后限本组织）----
 export async function listUsers(): Promise<User[]> {
   const { data } = await api.get<{ items: User[] }>('/admin/users')
   return data.items
 }
 
-export async function createUser(username: string, password: string, role: Role): Promise<User> {
-  const { data } = await api.post<User>('/admin/users', { username, password, role })
+export async function createUser(
+  username: string,
+  email: string,
+  password: string,
+  role: Role,
+): Promise<User> {
+  const { data } = await api.post<User>('/admin/users', { username, email, password, role })
   return data
 }
 
@@ -36,4 +41,24 @@ export interface Dashboard {
 export async function getDashboard(): Promise<Dashboard> {
   const { data } = await api.get<Dashboard>('/admin/dashboard')
   return data
+}
+
+// ---- 邀请成员（admin，按本组织）----
+export async function listInvites(): Promise<Invite[]> {
+  const { data } = await api.get<{ items: Invite[] }>('/admin/invites')
+  return data.items
+}
+
+export interface CreateInviteResponse {
+  invite: Invite
+  accept_path: string // 形如 /accept-invite?token=xxx
+}
+
+export async function createInvite(role: Role, email?: string): Promise<CreateInviteResponse> {
+  const { data } = await api.post<CreateInviteResponse>('/admin/invites', { role, email: email || undefined })
+  return data
+}
+
+export async function deleteInvite(id: number): Promise<void> {
+  await api.delete(`/admin/invites/${id}`)
 }

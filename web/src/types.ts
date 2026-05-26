@@ -8,7 +8,31 @@ export type ReviewStatus = 'approved' | 'needs_redo'
 export interface User {
   id: number
   username: string
+  email: string
   role: Role
+  org_id?: number | null
+  is_superadmin: boolean
+  created_at: string
+}
+
+// ---- 多租户（AUTH_MULTI_TENANCY_PLAN）----
+export interface Organization {
+  id: number
+  name: string
+  owner_id?: number | null
+  created_at: string
+  updated_at: string
+}
+
+export interface Invite {
+  id: number
+  org_id: number
+  role: Role
+  token: string
+  email?: string // 限定受邀邮箱；空=不限
+  expires_at: string
+  accepted_at?: string | null
+  accepted_by?: number | null
   created_at: string
 }
 

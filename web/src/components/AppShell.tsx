@@ -3,7 +3,7 @@ import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { ChevronDown, LogOut, Search, Settings2 } from 'lucide-react'
 import { CommandPalette } from './CommandPalette'
-import { NAV, ROLE_LABEL } from './nav'
+import { NAV, ROLE_LABEL, SUPERADMIN_NAV } from './nav'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/stores/auth'
 import { listDatasets } from '@/api/datasets'
@@ -14,7 +14,7 @@ export function AppShell() {
   const user = useAuth((s) => s.user)
   const [tweaks, setTweaks] = useState(false)
   const [cmdk, setCmdk] = useState(false)
-  const nav = NAV[user?.role ?? 'annotator']
+  const nav = user?.is_superadmin ? SUPERADMIN_NAV : NAV[user?.role ?? 'annotator']
 
   return (
     <div className="flex h-svh flex-col bg-background text-foreground">
@@ -52,6 +52,7 @@ export function AppShell() {
 function TopBar({ onTweaks, onSearch }: { onTweaks: () => void; onSearch: () => void }) {
   const nav = useNavigate()
   const user = useAuth((s) => s.user)
+  const org = useAuth((s) => s.org)
   const logout = useAuth((s) => s.logout)
 
   return (
@@ -61,7 +62,16 @@ function TopBar({ onTweaks, onSearch }: { onTweaks: () => void; onSearch: () => 
         labelo<span className="text-primary">.</span>
       </div>
       <div className="mx-1 h-5 w-px bg-border" />
-      <ProjectPicker />
+      {/* 组织名（顶栏）：超管不属于任何组织 */}
+      <span className="max-w-[180px] truncate text-[13px] font-medium" title={org?.name ?? undefined}>
+        {user?.is_superadmin ? '平台超管' : (org?.name ?? '—')}
+      </span>
+      {!user?.is_superadmin && (
+        <>
+          <div className="mx-1 h-5 w-px bg-border" />
+          <ProjectPicker />
+        </>
+      )}
 
       <button
         onClick={onSearch}

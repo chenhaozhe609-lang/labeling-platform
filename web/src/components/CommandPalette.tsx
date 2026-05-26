@@ -5,12 +5,13 @@ import { useQuery } from '@tanstack/react-query'
 import { Database, PenLine } from 'lucide-react'
 import { listDatasets } from '@/api/datasets'
 import { useAuth } from '@/stores/auth'
-import { NAV } from './nav'
+import { NAV, SUPERADMIN_NAV } from './nav'
 
 // ⌘K 命令面板（B3.2）：按角色导航 + 跳数据集 + 进入标注。
 export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenChange: (b: boolean) => void }) {
   const navigate = useNavigate()
-  const role = useAuth((s) => s.user?.role) ?? 'annotator'
+  const user = useAuth((s) => s.user)
+  const navItems = user?.is_superadmin ? SUPERADMIN_NAV : NAV[user?.role ?? 'annotator']
   const { data: datasets } = useQuery({ queryKey: ['datasets'], queryFn: listDatasets, enabled: open })
 
   // ⌘K / Ctrl+K 开关；Esc 关闭。
@@ -55,7 +56,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
           <Command.Empty className="px-3 py-6 text-center text-[13px] text-text-tertiary">无匹配项</Command.Empty>
 
           <Command.Group heading="导航">
-            {NAV[role].map((it) => (
+            {navItems.map((it) => (
               <Command.Item key={it.to} value={`导航 ${it.label}`} onSelect={() => go(it.to)} className={itemCls}>
                 <it.icon className="size-4" />
                 {it.label}

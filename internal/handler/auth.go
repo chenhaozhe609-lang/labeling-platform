@@ -37,7 +37,13 @@ type tokenResponse struct {
 }
 
 // issue 按用户当前 org/token_version 签发 access+refresh，并组织成响应。
+// org 为 nil 且用户有组织时自动补查（前端顶栏要显示组织名）；超管无组织保持 nil。
 func (h *AuthHandler) issue(c *gin.Context, u *domain.User, org any) {
+	if org == nil && u.OrgID != nil {
+		if o, err := h.store.GetOrg(c.Request.Context(), *u.OrgID); err == nil {
+			org = o
+		}
+	}
 	access, refresh, err := h.jm.Generate(u.ID, string(u.Role), u.OrgID, u.TokenVersion)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "token 签发失败"})

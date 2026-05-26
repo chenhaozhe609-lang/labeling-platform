@@ -16,9 +16,9 @@
 | 方法 | 路径 | 角色 | 请求 | 响应 |
 |---|---|---|---|---|
 | POST | `/auth/signup` | — | `{org_name, email, username, password(≥8)}` | `{access_token, refresh_token, user, org}`：建组织 + 注册人即该组织 admin |
-| POST | `/auth/login` | — | `{email, password}` | `{access_token, refresh_token, user}` |
-| POST | `/auth/refresh` | — | `{refresh_token}` | `{access_token, refresh_token}`（校验 `tv`，失效→`401`） |
-| POST | `/auth/accept-invite` | — | `{token, email, username, password(≥8)}` | `{access_token, refresh_token, user}`：凭邀请入既有组织（角色取自邀请） |
+| POST | `/auth/login` | — | `{email, password}` | `{access_token, refresh_token, user, org}` |
+| POST | `/auth/refresh` | — | `{refresh_token}` | `{access_token, refresh_token, user, org}`（校验 `tv`，失效→`401`） |
+| POST | `/auth/accept-invite` | — | `{token, email, username, password(≥8)}` | `{access_token, refresh_token, user, org}`：凭邀请入既有组织（角色取自邀请） |
 | POST | `/auth/logout-all` | 登录 | — | `{ok:true}`：bump `token_version`，吊销本人所有会话 |
 | GET | `/me` | 登录 | — | `User`（含 `email/org_id/is_superadmin`） |
 | GET | `/me/tasks` | 登录 | — | `{in_progress: MyTaskInProgress[], completed: MyTaskDone[]}`（B3.8） |
