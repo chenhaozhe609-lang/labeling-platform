@@ -4,6 +4,12 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      load_rows:
+        description: "百万行导出压测的行数（手动触发 load job）"
+        required: false
+        default: "1000000"
 
 # 同一分支/PR 仅保留最新一次运行。
 concurrency:
@@ -49,6 +55,8 @@ jobs:
       - run: npm ci
       - name: ESLint
         run: npm run lint
+      - name: 单元测试（vitest）
+        run: npm test
       - name: 类型检查 + 构建
         run: npm run build
 
@@ -68,3 +76,32 @@ jobs:
         run: npm install --no-save @commitlint/cli@19 @commitlint/config-conventional@19
       - name: 校验 PR 范围内的提交
         run: npx commitlint --from "${{ github.event.pull_request.base.sha }}" --to "${{ github.event.pull_request.head.sha }}" --verbose
+
+  integration:
+    name: 集成测试（testcontainers postgres）
+    runs-on: ubuntu-latest
+    # ubuntu-latest 预装 Docker，testcontainers 会起临时 postgres:17。
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: 集成测试（E1–E10 + 增量同步 + 审核）
+        run: go test -tags=integration -race -timeout 360s ./tests/integration/...
+
+  load:
+    name: 百万行导出压测（手动触发）
+    runs-on: ubuntu-latest
+    # 仅 workflow_dispatch 手动跑（AC-9），不拖慢日常 push/PR。
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: 导出流式压测
+        env:
+          LOAD_ROWS: ${{ github.event.inputs.load_rows }}
+        run: go test -tags=load -timeout 600s -v ./tests/load/...

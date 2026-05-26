@@ -1,0 +1,2 @@
+# Shell 脚本必须 LF，否则在 Linux/CI 上 `#!/usr/bin/env bash` 因 CRLF 报 bad interpreter。
+*.sh text eol=lf
