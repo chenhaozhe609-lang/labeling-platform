@@ -380,20 +380,24 @@ export function AnnotationWorkbench() {
         <aside className="w-[280px] shrink-0 border-r border-border">
           <ContextPane datasetName={dataset?.name ?? ''} pk={task!.source_row_pk} round={task!.round} history={[]} />
         </aside>
-        <main key={task!.id} className="min-w-0 flex-1 border-r border-border duration-200 animate-in fade-in slide-in-from-right-2">
-          <ReadingPane sourceRow={bundle.source_row} fields={contextFields} detailsOpen={detailsOpen} onToggleDetails={() => setDetailsOpen((o) => !o)} scrollRef={readingRef} />
+        {/* 中：补全表单 —— 视觉重心（最宽栏，内容居中） */}
+        <main key={`form-${task!.id}`} className="flex min-w-0 flex-1 flex-col overflow-y-auto border-r border-border duration-200 animate-in fade-in slide-in-from-right-2">
+          <div className="mx-auto flex w-full max-w-xl flex-1 flex-col px-6 py-8">
+            <div className="flex-1">
+              <SchemaForm fields={fillCols} values={values} activeFieldCode={activeFieldCode} errors={errors} aiFills={aiFills} onChange={setValue} onFieldFocus={setActiveFieldCode} onFieldBlur={validateField} />
+            </div>
+            <div className="sticky bottom-0 mt-6 bg-background pt-2">
+              <Button onClick={submit} disabled={submitting} className="w-full bg-success text-primary-foreground hover:bg-success/90">
+                {submitting ? <Loader2 className="size-4 animate-spin" /> : <CornerDownLeft className="size-4" />}
+                提交并下一条
+                <Kbd className="ml-1 border-primary-foreground/20 bg-primary-foreground/10 text-primary-foreground">↵</Kbd>
+              </Button>
+            </div>
+          </div>
         </main>
-        <aside key={`form-${task!.id}`} className="flex w-[380px] shrink-0 flex-col overflow-y-auto p-4 duration-200 animate-in fade-in slide-in-from-right-2">
-          <div className="flex-1">
-            <SchemaForm fields={fillCols} values={values} activeFieldCode={activeFieldCode} errors={errors} aiFills={aiFills} onChange={setValue} onFieldFocus={setActiveFieldCode} onFieldBlur={validateField} />
-          </div>
-          <div className="sticky bottom-0 mt-4 bg-background pt-2">
-            <Button onClick={submit} disabled={submitting} className="w-full bg-success text-primary-foreground hover:bg-success/90">
-              {submitting ? <Loader2 className="size-4 animate-spin" /> : <CornerDownLeft className="size-4" />}
-              提交并下一条
-              <Kbd className="ml-1 border-primary-foreground/20 bg-primary-foreground/10 text-primary-foreground">↵</Kbd>
-            </Button>
-          </div>
+        {/* 右：源内容（context 列）只读阅读 */}
+        <aside key={task!.id} className="w-[400px] shrink-0 duration-200 animate-in fade-in slide-in-from-right-2">
+          <ReadingPane sourceRow={bundle.source_row} fields={contextFields} detailsOpen={detailsOpen} onToggleDetails={() => setDetailsOpen((o) => !o)} scrollRef={readingRef} />
         </aside>
       </div>
 

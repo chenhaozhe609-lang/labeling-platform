@@ -100,14 +100,23 @@ function TopBar({ onTweaks, onSearch }: { onTweaks: () => void; onSearch: () => 
 
 function ProjectPicker() {
   const nav = useNavigate()
+  const loc = useLocation()
   const [open, setOpen] = useState(false)
   const { data } = useQuery({ queryKey: ['datasets'], queryFn: listDatasets })
+  // 当前路由是某个数据集时，按钮直接显示其名称，让使用者一眼知道在看哪个
+  const m = loc.pathname.match(/^\/datasets\/(\d+)/)
+  const currentId = m ? Number(m[1]) : null
+  const current = currentId != null ? (data ?? []).find((d) => d.id === currentId) : undefined
   return (
     <div className="relative">
-      <button onClick={() => setOpen((o) => !o)} className="flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] text-muted-foreground hover:bg-surface-3">
-        <span className="size-2 rounded-full bg-primary" />
-        切换数据集
-        <ChevronDown className="size-3.5" />
+      <button
+        onClick={() => setOpen((o) => !o)}
+        title={current?.name ?? undefined}
+        className="flex max-w-[220px] items-center gap-1.5 rounded-md px-2 py-1 text-[13px] text-muted-foreground hover:bg-surface-3"
+      >
+        <span className="size-2 shrink-0 rounded-full bg-primary" />
+        <span className="truncate">{current?.name ?? '切换数据集'}</span>
+        <ChevronDown className="size-3.5 shrink-0" />
       </button>
       {open && (
         <>
@@ -117,7 +126,11 @@ function ProjectPicker() {
               <button
                 key={d.id}
                 onClick={() => { nav(`/datasets/${d.id}`); setOpen(false) }}
-                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] hover:bg-surface-3"
+                aria-current={d.id === currentId ? 'true' : undefined}
+                className={cn(
+                  'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] hover:bg-surface-3',
+                  d.id === currentId && 'bg-surface-2 text-foreground',
+                )}
               >
                 <span className="truncate">{d.name}</span>
                 <span className="ml-auto font-mono text-[11px] tabular text-text-tertiary">{d.completed}/{d.total_rows}</span>

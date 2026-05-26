@@ -19,7 +19,7 @@ export function DashboardPage() {
 
   return (
     <div className="mx-auto max-w-5xl px-8 py-8">
-      <PageHeader eyebrow="OVERVIEW" title="总览" />
+      <PageHeader eyebrow="OVERVIEW" title="总览" description="本组织全部数据集的汇总进度（非单个数据集）" />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         {/* 完成度 */}

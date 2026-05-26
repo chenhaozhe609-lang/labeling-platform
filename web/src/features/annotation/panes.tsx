@@ -92,7 +92,7 @@ export function ReadingPane({
 
   return (
     <div ref={scrollRef} className="h-full overflow-y-auto scroll-smooth">
-      <article className="mx-auto max-w-[720px] px-10 py-10">
+      <article className="mx-auto max-w-[680px] px-6 py-8">
         {head && (
           <h2 className="text-2xl font-semibold tracking-tight text-foreground">
             {String(sourceRow[head.code] ?? '')}
