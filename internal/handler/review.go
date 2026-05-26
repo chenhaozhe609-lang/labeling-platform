@@ -75,7 +75,7 @@ func (h *ReviewHandler) Queue(c *gin.Context) {
 		if row == nil {
 			row = map[string]any{}
 		}
-		out = append(out, gin.H{
+		item := gin.H{
 			"annotation_id": it.AnnotationID,
 			"task_id":       it.TaskID,
 			"source_row_pk": it.SourceRowPK,
@@ -84,7 +84,11 @@ func (h *ReviewHandler) Queue(c *gin.Context) {
 			"created_at":    it.CreatedAt,
 			"data":          it.Data,
 			"source_row":    row,
-		})
+		}
+		if len(it.PrevData) > 0 { // 旧↔新对比：上一版（已废弃）标注（B4.2）
+			item["previous"] = json.RawMessage(it.PrevData)
+		}
+		out = append(out, item)
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"dataset_name":  ds.Name,
@@ -126,6 +130,46 @@ func (h *ReviewHandler) Decision(c *gin.Context) {
 	if err != nil {
 		slog.Error("裁决失败", "annotation", id, "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "裁决失败"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+// Edit 审核改写并通过（B4.4）：reviewer 微调 fills 后直接通过。
+func (h *ReviewHandler) Edit(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "非法 id"})
+		return
+	}
+	var req struct {
+		Data json.RawMessage `json:"data" binding:"required"`
+		Note string          `json:"note"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "data 必填"})
+		return
+	}
+	var payload struct {
+		Fills map[string]any `json:"fills"`
+	}
+	if json.Unmarshal(req.Data, &payload) != nil || len(payload.Fills) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "data.fills 不能为空"})
+		return
+	}
+
+	err = h.store.EditReview(c.Request.Context(), id, userID(c), req.Data, req.Note)
+	if errors.Is(err, store.ErrForbidden) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "不能改写本人提交的标注"})
+		return
+	}
+	if errors.Is(err, store.ErrConflict) {
+		c.JSON(http.StatusConflict, gin.H{"error": "该标注已被审核或已失效"})
+		return
+	}
+	if err != nil {
+		slog.Error("改写并通过失败", "annotation", id, "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存失败"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})

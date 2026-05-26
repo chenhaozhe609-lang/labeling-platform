@@ -193,6 +193,7 @@ func runServer(cfg config.Config) {
 		reviews.Use(middleware.RequireRole(domain.RoleReviewer, domain.RoleAdmin))
 		reviews.GET("/queue", reviewH.Queue)
 		reviews.POST("/:id/decision", reviewH.Decision)
+		reviews.POST("/:id/edit", reviewH.Edit)
 	}
 
 	srv := &http.Server{Addr: cfg.HTTPAddr, Handler: r}

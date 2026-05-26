@@ -7,19 +7,27 @@ import {
   Loader2,
   LogOut,
   PartyPopper,
+  Pencil,
   RotateCcw,
+  Save,
   Sparkles,
   User,
+  X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Textarea } from '@/components/ui/textarea'
 import { Kbd } from '@/components/Kbd'
 import { cn } from '@/lib/utils'
-import type { ColumnSpec, DatasetListItem, FormSchema, ReviewItem, ReviewStatus } from '@/types'
+import type { AnnotationData, ColumnSpec, DatasetListItem, FormSchema, ReviewItem, ReviewStatus } from '@/types'
 import { listDatasets } from '@/api/tasks'
-import { decideReview, getReviewQueue } from '@/api/reviews'
+import { decideReview, editReview, getReviewQueue } from '@/api/reviews'
+import { SchemaForm } from '@/features/annotation/SchemaForm'
 import { useSettings } from '@/stores/settings'
+
+const eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
+const isEmpty = (v: unknown) =>
+  v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0)
 
 type Phase = 'loading' | 'ready' | 'empty' | 'nodataset'
 
@@ -38,6 +46,8 @@ export function ReviewPage() {
   const [idx, setIdx] = useState(0)
   const [note, setNote] = useState('')
   const [deciding, setDeciding] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [editVals, setEditVals] = useState<Record<string, unknown>>({})
 
   const current = queue[idx] ?? null
 
@@ -51,6 +61,7 @@ export function ReviewPage() {
       setQueue(res.items)
       setIdx(0)
       setNote('')
+      setEditing(false)
       setPhase(res.items.length ? 'ready' : 'empty')
     } catch {
       toast.error('加载审核队列失败')
@@ -85,50 +96,100 @@ export function ReviewPage() {
   function select(i: number) {
     setIdx(Math.min(Math.max(i, 0), Math.max(queue.length - 1, 0)))
     setNote('') // 切到别的标注时清空上一条的备注
+    setEditing(false)
   }
   function move(delta: number) {
     select(idx + delta)
   }
 
+  // 处理完一条：移出本地队列、自动推进、必要时再抽一批。
+  function advancePast(annotationId: number) {
+    const next = queue.filter((it) => it.annotation_id !== annotationId)
+    setQueue(next)
+    setIdx((i) => Math.min(i, Math.max(next.length - 1, 0)))
+    setNote('')
+    setEditing(false)
+    if (next.length === 0 && dataset) void loadQueue(dataset.id)
+  }
+
+  function handleErr(e: unknown, annotationId: number) {
+    const httpStatus = (e as { response?: { status?: number } }).response?.status
+    if (httpStatus === 409) {
+      toast.error('该标注已被其他审核员处理，已跳过')
+      setQueue((q) => q.filter((it) => it.annotation_id !== annotationId))
+    } else if (httpStatus === 403) {
+      toast.error('不能审核本人提交的标注')
+    } else {
+      toast.error('操作失败，请重试')
+    }
+  }
+
   async function decide(status: ReviewStatus) {
-    if (!current || deciding) return
+    if (!current || deciding || editing) return
     setDeciding(true)
     const decided = current
     try {
       await decideReview(decided.annotation_id, status, status === 'needs_redo' ? note : undefined)
       toast.success(status === 'approved' ? `已通过 · #${decided.task_id}` : `已打回重标 · #${decided.task_id}`)
       setPendingTotal((n) => Math.max(n - 1, 0))
-      // 从本地队列移除，自动推进到下一条
-      const next = queue.filter((it) => it.annotation_id !== decided.annotation_id)
-      setQueue(next)
-      setIdx((i) => Math.min(i, Math.max(next.length - 1, 0)))
-      setNote('')
-      if (next.length === 0 && dataset) void loadQueue(dataset.id) // 抽下一批
+      advancePast(decided.annotation_id)
     } catch (e) {
-      const httpStatus = (e as { response?: { status?: number } }).response?.status
-      if (httpStatus === 409) {
-        toast.error('该标注已被其他审核员处理，已跳过')
-        setQueue((q) => q.filter((it) => it.annotation_id !== decided.annotation_id))
-      } else if (httpStatus === 403) {
-        toast.error('不能审核本人提交的标注')
-      } else {
-        toast.error('裁决失败，请重试')
-      }
+      handleErr(e, decided.annotation_id)
     } finally {
       setDeciding(false)
     }
   }
 
-  // 键盘：A 通过 / R 打回 / J·K 切换（备注聚焦时仅 Esc 失焦）
+  function enterEdit() {
+    if (!current) return
+    setEditVals({ ...(current.data.fills ?? {}) }) // 以现有答案为起点
+    setEditing(true)
+  }
+
+  async function saveEdit() {
+    if (!current || deciding) return
+    const fillCodes = (schema?.columns ?? []).filter((c) => c.role === 'fill').map((c) => c.code)
+    const missing = fillCodes.find((code) => isEmpty(editVals[code]))
+    if (missing) {
+      toast.error('请补全所有列后再保存')
+      return
+    }
+    setDeciding(true)
+    const decided = current
+    try {
+      const data: AnnotationData = { fills: editVals, _source: 'reviewer-edited' }
+      await editReview(decided.annotation_id, data, note)
+      toast.success(`已改写并通过 · #${decided.task_id}`)
+      setPendingTotal((n) => Math.max(n - 1, 0))
+      advancePast(decided.annotation_id)
+    } catch (e) {
+      handleErr(e, decided.annotation_id)
+    } finally {
+      setDeciding(false)
+    }
+  }
+
+  // 键盘：A 通过 / R 打回 / E 编辑 / J·K 切换（备注聚焦时仅 Esc 失焦）
   const keyHandler = (e: KeyboardEvent) => {
     if (phase !== 'ready' || !current || !shortcutsEnabled) return
+    const mod = e.metaKey || e.ctrlKey
+    // 编辑态隔离：只响应 ⌘/Ctrl+Enter 保存、Esc 取消；不触发队列快捷键。
+    if (editing) {
+      if (mod && e.key === 'Enter') {
+        e.preventDefault()
+        void saveEdit()
+      } else if (e.key === 'Escape') {
+        e.preventDefault()
+        setEditing(false)
+      }
+      return
+    }
     const el = document.activeElement as HTMLElement | null
-    const inText = el?.tagName === 'TEXTAREA' || el?.tagName === 'INPUT'
-    if (inText) {
+    if (el?.tagName === 'TEXTAREA' || el?.tagName === 'INPUT') {
       if (e.key === 'Escape') el?.blur()
       return
     }
-    if (e.metaKey || e.ctrlKey || e.altKey) return
+    if (mod || e.altKey) return
     switch (e.key) {
       case 'a':
       case 'A':
@@ -139,6 +200,11 @@ export function ReviewPage() {
       case 'R':
         e.preventDefault()
         void decide('needs_redo')
+        break
+      case 'e':
+      case 'E':
+        e.preventDefault()
+        enterEdit()
         break
       case 'j':
       case 'J':
@@ -264,53 +330,87 @@ export function ReviewPage() {
 
             <aside className="flex w-[400px] shrink-0 flex-col overflow-y-auto p-4">
               <div className="mb-3 flex items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">
-                标注答案
+                {editing ? '编辑标注' : '标注答案'}
                 <SourceBadge source={current.data._source} />
                 <span className="ml-auto normal-case text-text-tertiary">由 {current.annotator}</span>
               </div>
 
-              <div className="flex flex-col gap-3 rounded-lg border border-border bg-card p-4">
-                {fillCols.map((col) => (
-                  <div key={col.code} className="flex flex-col gap-1">
-                    <span className="text-[12px] text-text-tertiary">{col.label || col.code}</span>
-                    <span className="text-[14px] text-foreground">
-                      {renderAnswer(col, current.data.fills?.[col.code])}
-                    </span>
-                  </div>
-                ))}
-                {fillCols.length === 0 && <div className="text-[13px] text-text-tertiary">无补全列</div>}
-              </div>
+              {editing ? (
+                <SchemaForm
+                  fields={fillCols}
+                  values={editVals}
+                  activeFieldCode={null}
+                  errors={{}}
+                  aiFills={current.data._ai}
+                  onChange={(code, v) => setEditVals((p) => ({ ...p, [code]: v }))}
+                  onFieldFocus={() => {}}
+                />
+              ) : (
+                <div className="flex flex-col gap-3 rounded-lg border border-border bg-card p-4">
+                  {fillCols.map((col) => (
+                    <DiffRow
+                      key={col.code}
+                      col={col}
+                      value={current.data.fills?.[col.code]}
+                      prev={current.previous?.fills?.[col.code]}
+                      ai={current.data._ai?.[col.code]}
+                      hasPrev={!!current.previous}
+                      hasAI={!!current.data._ai}
+                    />
+                  ))}
+                  {fillCols.length === 0 && <div className="text-[13px] text-text-tertiary">无补全列</div>}
+                </div>
+              )}
 
               <div className="mt-4">
                 <Textarea
                   id="review-note"
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
-                  placeholder="打回备注（可选）"
+                  placeholder={editing ? '修改说明（可选）' : '打回备注（可选）'}
                   className="min-h-16 resize-none bg-background text-[13px]"
                 />
               </div>
 
               <div className="sticky bottom-0 mt-3 flex gap-2 bg-background pt-2">
-                <Button
-                  onClick={() => decide('approved')}
-                  disabled={deciding}
-                  className="flex-1 bg-success text-primary-foreground hover:bg-success/90"
-                >
-                  {deciding ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
-                  通过
-                  <Kbd className="ml-1 border-primary-foreground/20 bg-primary-foreground/10 text-primary-foreground">A</Kbd>
-                </Button>
-                <Button
-                  onClick={() => decide('needs_redo')}
-                  disabled={deciding}
-                  variant="outline"
-                  className="flex-1 border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                >
-                  <RotateCcw className="size-4" />
-                  打回
-                  <Kbd className="ml-1">R</Kbd>
-                </Button>
+                {editing ? (
+                  <>
+                    <Button
+                      onClick={saveEdit}
+                      disabled={deciding}
+                      className="flex-1 bg-success text-primary-foreground hover:bg-success/90"
+                    >
+                      {deciding ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
+                      保存并通过
+                      <Kbd className="ml-1 border-primary-foreground/20 bg-primary-foreground/10 text-primary-foreground">⌘↵</Kbd>
+                    </Button>
+                    <Button onClick={() => setEditing(false)} disabled={deciding} variant="outline">
+                      <X className="size-4" />取消<Kbd className="ml-1">Esc</Kbd>
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <Button
+                      onClick={() => decide('approved')}
+                      disabled={deciding}
+                      className="flex-1 bg-success text-primary-foreground hover:bg-success/90"
+                    >
+                      {deciding ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
+                      通过<Kbd className="ml-1 border-primary-foreground/20 bg-primary-foreground/10 text-primary-foreground">A</Kbd>
+                    </Button>
+                    <Button onClick={enterEdit} disabled={deciding} variant="outline" title="编辑后通过">
+                      <Pencil className="size-4" /><Kbd className="ml-1">E</Kbd>
+                    </Button>
+                    <Button
+                      onClick={() => decide('needs_redo')}
+                      disabled={deciding}
+                      variant="outline"
+                      className="flex-1 border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                    >
+                      <RotateCcw className="size-4" />打回<Kbd className="ml-1">R</Kbd>
+                    </Button>
+                  </>
+                )}
               </div>
             </aside>
           </main>
@@ -320,6 +420,7 @@ export function ReviewPage() {
       {phase === 'ready' && current && (
         <footer className="flex h-8 shrink-0 items-center gap-4 border-t border-border px-4 text-[11px] text-text-tertiary">
           <Hint k="A" label="通过" />
+          <Hint k="E" label="编辑" />
           <Hint k="R" label="打回" />
           <Hint k="J / K" label="切换队列" />
           <Hint k="N" label="备注" />
@@ -366,6 +467,42 @@ function SourceView({
   )
 }
 
+/** 一个 fill 列的答案 + 「旧↔新 / AI↔人」对比标记（B4.2）。 */
+function DiffRow({
+  col,
+  value,
+  prev,
+  ai,
+  hasPrev,
+  hasAI,
+}: {
+  col: ColumnSpec
+  value: unknown
+  prev: unknown
+  ai: unknown
+  hasPrev: boolean
+  hasAI: boolean
+}) {
+  const changedFromPrev = hasPrev && !eq(prev, value)
+  const changedFromAI = hasAI && !eq(ai, value)
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-[12px] text-text-tertiary">{col.label || col.code}</span>
+      <span className="text-[14px] text-foreground">{renderAnswer(col, value)}</span>
+      {changedFromPrev && (
+        <span className="text-[11px] text-warning">
+          旧 <span className="line-through opacity-80">{renderAnswer(col, prev)}</span>
+        </span>
+      )}
+      {changedFromAI && (
+        <span className="inline-flex items-center gap-1 text-[11px] text-ai">
+          <Sparkles className="size-3" />AI {renderAnswer(col, ai)}
+        </span>
+      )}
+    </div>
+  )
+}
+
 function SourceBadge({ source }: { source?: string }) {
   if (source === 'ai')
     return (
@@ -379,6 +516,8 @@ function SourceBadge({ source }: { source?: string }) {
         <Sparkles className="size-3" />AI+人工
       </span>
     )
+  if (source === 'reviewer-edited')
+    return <span className="rounded bg-primary/10 px-1.5 text-[11px] normal-case text-primary">审核修正</span>
   return <span className="rounded bg-surface-2 px-1.5 text-[11px] normal-case text-muted-foreground">人工</span>
 }
 

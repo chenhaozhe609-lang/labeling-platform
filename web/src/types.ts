@@ -113,7 +113,8 @@ export interface TaskBundle {
 // ---- 标注数据（v2：补全 fill 列的值）----
 export interface AnnotationData {
   fills: Record<string, unknown> // fill 列 code → 填入值
-  _source?: 'human' | 'ai' | 'ai-edited'
+  _source?: 'human' | 'ai' | 'ai-edited' | 'reviewer-edited'
+  _ai?: Record<string, unknown> // 提交时 AI 预填的值（供审核台 AI↔人 对比，B4.2）
   _durationSec?: number
 }
 export interface SubmitPayload {
@@ -137,7 +138,8 @@ export interface ReviewItem {
   round: number
   annotator: string
   created_at: string
-  data: AnnotationData // 标注员补全的 fills + _source
+  data: AnnotationData // 标注员补全的 fills + _source（+ 提交时 _ai）
+  previous?: AnnotationData | null // 同任务上一版（已废弃）标注，供「旧↔新」对比（B4.2）
   source_row: Record<string, unknown>
 }
 export interface ReviewQueueResponse {

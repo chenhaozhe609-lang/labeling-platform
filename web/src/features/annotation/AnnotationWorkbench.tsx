@@ -173,7 +173,11 @@ export function AnnotationWorkbench() {
     setSubmitting(true)
     const id = bundle.task.id
     try {
-      await submitTask(id, { fills: values, _source: computeSource() }, bundle.form_schema.version)
+      await submitTask(
+        id,
+        { fills: values, _source: computeSource(), ...(aiFills ? { _ai: aiFills } : {}) },
+        bundle.form_schema.version,
+      )
       clearDraft(id)
       toast.success(`已提交 · #${id}`)
       await claimNext(bundle.task.dataset_id)
