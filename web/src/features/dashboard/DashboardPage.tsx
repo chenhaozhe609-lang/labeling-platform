@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { getDashboard } from '@/api/admin'
+import { PageHeader } from '@/components/PageHeader'
 import { ActivityFeed, Donut, Leaderboard, Legend, SegmentedProgress, StatCard, type Segment } from '@/components/viz'
 
 export function DashboardPage() {
@@ -18,7 +19,7 @@ export function DashboardPage() {
 
   return (
     <div className="mx-auto max-w-5xl px-8 py-8">
-      <h1 className="mb-6 text-xl font-semibold tracking-tight">总览</h1>
+      <PageHeader eyebrow="OVERVIEW" title="总览" />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         {/* 完成度 */}

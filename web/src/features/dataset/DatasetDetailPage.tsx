@@ -81,9 +81,10 @@ export function DatasetDetailPage() {
       </Link>
 
       <div className="mb-6 flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">{d.name}</h1>
-          <p className="mt-1 font-mono text-[12px] tabular text-text-tertiary">
+        <div className="min-w-0">
+          <div className="mb-1.5 font-mono text-[11px] uppercase tracking-[0.18em] text-text-tertiary">DATASET</div>
+          <h1 className="truncate font-serif text-[27px] leading-[1.1] tracking-tight">{d.name}</h1>
+          <p className="mt-1.5 font-mono text-[12px] tabular text-text-tertiary">
             {d.source_schema}.{d.source_table} · pk={d.source_pk_column} · v{d.form_schema_version} · {d.status}
           </p>
         </div>

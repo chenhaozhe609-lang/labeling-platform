@@ -16,6 +16,7 @@ import { SchemaEditorPage } from '@/features/dataset/SchemaEditorPage'
 import { DashboardPage } from '@/features/dashboard/DashboardPage'
 import { UsersPage } from '@/features/admin/UsersPage'
 import { MyTasksPage } from '@/features/me/MyTasksPage'
+import { LandingPage } from '@/features/marketing/LandingPage'
 import { queryClient } from '@/lib/query'
 import { useAuth } from '@/stores/auth'
 
@@ -72,7 +73,8 @@ function App() {
             <Route path="/me/tasks" element={<MyTasksPage />} />
           </Route>
 
-          <Route path="/" element={<Navigate to="/datasets" replace />} />
+          {/* 公开门面：着陆页 */}
+          <Route path="/" element={<LandingPage />} />
           <Route path="*" element={<Navigate to="/datasets" replace />} />
         </Routes>
         <Toaster position="bottom-right" />

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { Plus } from 'lucide-react'
 import { listDatasets } from '@/api/datasets'
 import { useAuth } from '@/stores/auth'
+import { PageHeader } from '@/components/PageHeader'
 import { cn } from '@/lib/utils'
 import type { DatasetListItem, DatasetStatus } from '@/types'
 
@@ -20,18 +21,21 @@ export function DatasetsListPage() {
 
   return (
     <div className="mx-auto max-w-5xl px-8 py-8">
-      <header className="mb-6 flex items-center justify-between">
-        <h1 className="text-xl font-semibold tracking-tight">数据集</h1>
-        {isAdmin && (
-          <Link
-            to="/datasets/upload"
-            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-[13px] font-medium text-primary-foreground transition-opacity hover:opacity-90"
-          >
-            <Plus className="size-4" />
-            新建数据集
-          </Link>
-        )}
-      </header>
+      <PageHeader
+        eyebrow="DATASETS"
+        title="数据集"
+        actions={
+          isAdmin && (
+            <Link
+              to="/datasets/upload"
+              className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-[13px] font-medium text-primary-foreground transition-opacity hover:opacity-90"
+            >
+              <Plus className="size-4" />
+              新建数据集
+            </Link>
+          )
+        }
+      />
 
       {isLoading && <p className="text-sm text-muted-foreground">加载中…</p>}
       {error && <p className="text-sm text-destructive">加载失败</p>}

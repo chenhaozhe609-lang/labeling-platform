@@ -1,82 +1,87 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600&display=swap');
 @import 'tailwindcss';
 @import 'tw-animate-css';
 
 @custom-variant dark (&:is(.dark *));
 
 /* ============================================================================
-   设计 token —— 深色为主力（UI_BUILD_SPEC §2）。:root=浅色，.dark=深色。
-   index.html 在 <html> 上挂 class="dark"，故默认即深色。
+   设计 token —— 编辑感极简 · 暖中性（UI_BUILD_SPEC §2）。:root=浅色，.dark=暖炭深色。
+   默认跟随系统：index.html 的 pre-paint 脚本按 prefers-color-scheme / 已存偏好挂 .dark。
+   accent 体系：--primary=墨色（主按钮），--brand=暖玫瑰（唯一点缀色，用量极少）。
    ============================================================================ */
 :root {
   --radius: 0.5rem; /* 8px */
 
-  --background: #ffffff;
-  --foreground: #1a1d23;
+  --background: #f6f3ee;
+  --foreground: #221f1b;
   --card: #ffffff;
-  --card-foreground: #1a1d23;
+  --card-foreground: #221f1b;
   --popover: #ffffff;
-  --popover-foreground: #1a1d23;
-  --primary: #5b63d3;
-  --primary-foreground: #ffffff;
-  --secondary: #f4f5f7;
-  --secondary-foreground: #1a1d23;
-  --muted: #f4f5f7;
-  --muted-foreground: #5b626e;
-  --accent: #f0f1f4;
-  --accent-foreground: #1a1d23;
-  --destructive: #dc3f49;
+  --popover-foreground: #221f1b;
+  --primary: #221f1b;
+  --primary-foreground: #f6f3ee;
+  --secondary: #f0ebe3;
+  --secondary-foreground: #221f1b;
+  --muted: #f0ebe3;
+  --muted-foreground: #6a6157;
+  --accent: #ece3d7;
+  --accent-foreground: #221f1b;
+  --destructive: #bc4a3f;
   --destructive-foreground: #ffffff;
-  --border: #e3e5e9;
-  --input: #e3e5e9;
-  --ring: #5b63d3;
+  --border: #e6dfd4;
+  --input: #e6dfd4;
+  --ring: #221f1b;
 
   /* 业务语义扩展 */
-  --success: #2e9e43;
-  --warning: #b8860b;
-  --ai: #7c5cd6;
-  --info: #0284c7;
-  --surface-2: #f4f5f7;
-  --surface-3: #ebedf1;
-  --border-subtle: #eceef1;
-  --border-strong: #cfd3da;
-  --text-tertiary: #8a909c;
+  --brand: #b06a78; /* 暖玫瑰，唯一点缀色 */
+  --brand-foreground: #ffffff;
+  --success: #5e8c7b;
+  --warning: #b08a4a;
+  --ai: #8a6fb0;
+  --info: #6f9bb5;
+  --surface-2: #f0ebe3;
+  --surface-3: #e9e0d3;
+  --border-subtle: #efe8dd;
+  --border-strong: #d8cfc1;
+  --text-tertiary: #8a8073;
 }
 
 .dark {
-  --background: #0c0e12;
-  --foreground: #e6e9ef;
-  --card: #14171c;
-  --card-foreground: #e6e9ef;
-  --popover: #232830;
-  --popover-foreground: #e6e9ef;
-  --primary: #818cf8;
-  --primary-foreground: #0c0e12;
-  --secondary: #1b1f26;
-  --secondary-foreground: #e6e9ef;
-  --muted: #1b1f26;
-  --muted-foreground: #a0a7b4;
-  --accent: #232830;
-  --accent-foreground: #e6e9ef;
-  --destructive: #f0626b;
+  --background: #1a1715;
+  --foreground: #ece6dc;
+  --card: #26221f;
+  --card-foreground: #ece6dc;
+  --popover: #2b2723;
+  --popover-foreground: #ece6dc;
+  --primary: #ece6dc;
+  --primary-foreground: #1a1715;
+  --secondary: #2b2723;
+  --secondary-foreground: #ece6dc;
+  --muted: #2b2723;
+  --muted-foreground: #a79d8f;
+  --accent: #322d28;
+  --accent-foreground: #ece6dc;
+  --destructive: #d2685c;
   --destructive-foreground: #ffffff;
-  --border: #2c313a;
-  --input: #2c313a;
-  --ring: #818cf8;
+  --border: #332e28;
+  --input: #332e28;
+  --ring: #ece6dc;
 
-  --success: #3fb950;
-  --warning: #e3b341;
-  --ai: #a78bfa;
-  --info: #38bdf8;
-  --surface-2: #1b1f26;
-  --surface-3: #232830;
-  --border-subtle: #20242b;
-  --border-strong: #3a414c;
-  --text-tertiary: #6b7280;
+  --brand: #cc8067;
+  --brand-foreground: #1a1715;
+  --success: #79a693;
+  --warning: #c7a468;
+  --ai: #a992d6;
+  --info: #8fb4c4;
+  --surface-2: #2b2723;
+  --surface-3: #322d28;
+  --border-subtle: #28231f;
+  --border-strong: #443d35;
+  --text-tertiary: #948a7b;
 }
 
 /* ============================================================================
-   @theme inline —— 把 token 暴露为 Tailwind 工具类（bg-background / text-success ...）
+   @theme inline —— 把 token 暴露为 Tailwind 工具类（bg-background / text-success / font-serif ...）
    ============================================================================ */
 @theme inline {
   --color-background: var(--background);
@@ -99,6 +104,8 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
 
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-ai: var(--ai);
@@ -114,6 +121,7 @@
   --radius-lg: calc(var(--radius) + 4px);
 
   --font-sans: 'Inter', system-ui, sans-serif;
+  --font-serif: 'Instrument Serif', Georgia, serif;
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;
 }
 

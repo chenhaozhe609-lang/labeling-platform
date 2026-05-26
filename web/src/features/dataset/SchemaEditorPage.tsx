@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { ArrowLeft, Loader2, Plus, Trash2 } from 'lucide-react'
 import { getDatasetDetail, updateFormSchema } from '@/api/datasets'
 import { queryClient } from '@/lib/query'
+import { PageHeader } from '@/components/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
@@ -78,10 +79,15 @@ export function SchemaEditorPage() {
         <ArrowLeft className="size-4" />
         {data.dataset.name}
       </Link>
-      <h1 className="mb-1 text-xl font-semibold tracking-tight">列与字段</h1>
-      <p className="mb-6 text-[13px] text-text-tertiary">
-        为每列指定角色：<b>上下文</b>（只读，也作 AI 预填依据）·<b>补全</b>（待标注，按类型配置控件）·<b>隐藏</b>。保存后回详情页点「生成任务」。
-      </p>
+      <PageHeader
+        eyebrow="SCHEMA"
+        title="列与字段"
+        description={
+          <>
+            为每列指定角色：<b>上下文</b>（只读，也作 AI 预填依据）·<b>补全</b>（待标注，按类型配置控件）·<b>隐藏</b>。保存后回详情页点「生成任务」。
+          </>
+        }
+      />
 
       <div className="flex flex-col gap-2">
         {cols.map((c, i) => (

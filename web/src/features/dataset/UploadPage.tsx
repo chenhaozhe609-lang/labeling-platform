@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, FileUp, Loader2 } from 'lucide-react'
 import { uploadDataset } from '@/api/datasets'
+import { PageHeader } from '@/components/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 
@@ -30,7 +31,7 @@ export function UploadPage() {
         <ArrowLeft className="size-4" />
         数据集
       </Link>
-      <h1 className="mb-6 text-xl font-semibold tracking-tight">新建数据集</h1>
+      <PageHeader eyebrow="NEW DATASET" title="新建数据集" />
 
       <label className="mb-1.5 block text-[13px] text-muted-foreground">数据集名称</label>
       <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="如：新闻分类" className="mb-5" />

@@ -12,6 +12,7 @@ import {
   updateUser,
 } from '@/api/admin'
 import { useAuth } from '@/stores/auth'
+import { PageHeader } from '@/components/PageHeader'
 import type { Invite, Role } from '@/types'
 
 const ROLES: Role[] = ['annotator', 'reviewer', 'admin']
@@ -71,7 +72,7 @@ export function UsersPage() {
 
   return (
     <div className="mx-auto max-w-3xl px-8 py-8">
-      <h1 className="mb-6 text-xl font-semibold tracking-tight">用户管理</h1>
+      <PageHeader eyebrow="USERS" title="用户管理" />
 
       {/* 邀请成员 */}
       <InvitesSection />

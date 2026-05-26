@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { listOrgs } from '@/api/platform'
+import { PageHeader } from '@/components/PageHeader'
 
 // 平台超管：组织列表（跨组织运营/排障）。
 export function PlatformOrgsPage() {
@@ -10,8 +11,7 @@ export function PlatformOrgsPage() {
 
   return (
     <div className="mx-auto max-w-3xl px-8 py-8">
-      <h1 className="mb-1 text-xl font-semibold tracking-tight">组织</h1>
-      <p className="mb-6 text-[13px] text-muted-foreground">平台超管视图 · 共 {data.length} 个组织</p>
+      <PageHeader eyebrow="PLATFORM · ORGS" title="组织" description={`平台超管视图 · 共 ${data.length} 个组织`} />
 
       <section className="rounded-lg border border-border bg-card p-4">
         <table className="w-full text-[13px]">

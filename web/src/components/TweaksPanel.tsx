@@ -1,5 +1,6 @@
 import { X } from 'lucide-react'
 import { useSettings } from '@/stores/settings'
+import { useTheme } from '@/stores/theme'
 import { cn } from '@/lib/utils'
 
 export function TweaksPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -7,6 +8,8 @@ export function TweaksPanel({ open, onClose }: { open: boolean; onClose: () => v
   const density = useSettings((s) => s.density)
   const setShortcuts = useSettings((s) => s.setShortcuts)
   const setDensity = useSettings((s) => s.setDensity)
+  const themePref = useTheme((s) => s.pref)
+  const setThemePref = useTheme((s) => s.setPref)
   if (!open) return null
 
   return (
@@ -19,6 +22,29 @@ export function TweaksPanel({ open, onClose }: { open: boolean; onClose: () => v
             <X className="size-4" />
           </button>
         </div>
+
+        <Row label="主题">
+          <div className="flex gap-1">
+            {(
+              [
+                ['system', '系统'],
+                ['light', '浅色'],
+                ['dark', '深色'],
+              ] as const
+            ).map(([v, label]) => (
+              <button
+                key={v}
+                onClick={() => setThemePref(v)}
+                className={cn(
+                  'rounded-md border px-2.5 py-1 text-[12px] transition-colors',
+                  themePref === v ? 'border-primary bg-primary text-primary-foreground' : 'border-border text-muted-foreground hover:bg-surface-3',
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </Row>
 
         <Row label="标注快捷键">
           <Toggle on={shortcuts} onChange={setShortcuts} />
@@ -45,7 +71,7 @@ export function TweaksPanel({ open, onClose }: { open: boolean; onClose: () => v
           <span className="font-mono text-[12px] tabular text-text-tertiary">30 分钟 · 服务端</span>
         </Row>
 
-        <p className="mt-auto text-[11px] text-text-tertiary">主题固定深色（设计基线，不提供浅色切换）。</p>
+        <p className="mt-auto text-[11px] text-text-tertiary">主题默认跟随系统，可在此手动覆盖。</p>
       </div>
     </>
   )

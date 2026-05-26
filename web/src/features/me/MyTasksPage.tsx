@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { CheckCircle2, Clock, PenLine } from 'lucide-react'
 import { getMyTasks } from '@/api/tasks'
+import { PageHeader } from '@/components/PageHeader'
 import type { ReviewStatus } from '@/types'
 
 const REVIEW_LABEL: Record<ReviewStatus, { text: string; cls: string }> = {
@@ -17,7 +18,7 @@ export function MyTasksPage() {
 
   return (
     <div className="mx-auto max-w-3xl px-8 py-8">
-      <h1 className="mb-6 text-xl font-semibold tracking-tight">我的任务</h1>
+      <PageHeader eyebrow="MY TASKS" title="我的任务" />
 
       {/* 进行中（CLAIMED 给我，未提交） */}
       <section className="mb-6">

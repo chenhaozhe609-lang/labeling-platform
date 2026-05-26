@@ -50,7 +50,7 @@ export function SignupPage() {
     <div className="flex min-h-svh items-center justify-center bg-background">
       <form onSubmit={onSubmit} className="w-80 rounded-lg border border-border bg-card p-7">
         <div className="mb-6 text-center">
-          <h1 className="text-lg font-semibold tracking-tight">创建组织</h1>
+          <h1 className="font-serif text-[24px] leading-tight tracking-tight">创建组织</h1>
           <p className="mt-1 text-[13px] text-muted-foreground">你将成为该组织的管理员</p>
         </div>
 
