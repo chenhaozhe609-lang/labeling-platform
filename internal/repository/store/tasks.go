@@ -149,6 +149,73 @@ func (s *Store) ReapExpiredLeases(ctx context.Context) (int64, error) {
 	return tag.RowsAffected(), nil
 }
 
+// MyTaskRow 我「进行中」的任务（CLAIMED 给我的）。
+type MyTaskRow struct {
+	TaskID         int64      `json:"task_id"`
+	DatasetID      int64      `json:"dataset_id"`
+	DatasetName    string     `json:"dataset_name"`
+	SourceRowPK    string     `json:"source_row_pk"`
+	LeaseExpiresAt *time.Time `json:"lease_expires_at,omitempty"`
+}
+
+// MyDoneRow 我「已完成」的标注（我提交、当前有效）。
+type MyDoneRow struct {
+	TaskID       int64     `json:"task_id"`
+	DatasetID    int64     `json:"dataset_id"`
+	DatasetName  string    `json:"dataset_name"`
+	SourceRowPK  string    `json:"source_row_pk"`
+	Round        int       `json:"round"`
+	CreatedAt    time.Time `json:"created_at"`
+	ReviewStatus *string   `json:"review_status,omitempty"` // approved / needs_redo / null（未审）
+}
+
+// MyInProgress 当前 CLAIMED 给该用户、尚未提交的任务（B3.8「进行中」）。
+func (s *Store) MyInProgress(ctx context.Context, userID int64) ([]MyTaskRow, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT t.id, t.dataset_id, d.name, t.source_row_pk, t.lease_expires_at
+		FROM tasks t JOIN datasets d ON d.id = t.dataset_id
+		WHERE t.assigned_to = $1 AND t.status = 'CLAIMED'
+		ORDER BY t.claimed_at DESC`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []MyTaskRow{}
+	for rows.Next() {
+		var r MyTaskRow
+		if err := rows.Scan(&r.TaskID, &r.DatasetID, &r.DatasetName, &r.SourceRowPK, &r.LeaseExpiresAt); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// MyCompleted 该用户提交、当前有效的标注（B3.8「已完成」），按时间倒序取 limit 条。
+func (s *Store) MyCompleted(ctx context.Context, userID int64, limit int) ([]MyDoneRow, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT a.task_id, a.dataset_id, d.name, t.source_row_pk, a.round, a.created_at, a.review_status
+		FROM annotations a
+		JOIN tasks t ON t.id = a.task_id
+		JOIN datasets d ON d.id = a.dataset_id
+		WHERE a.user_id = $1 AND a.superseded_at IS NULL
+		ORDER BY a.created_at DESC
+		LIMIT $2`, userID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []MyDoneRow{}
+	for rows.Next() {
+		var r MyDoneRow
+		if err := rows.Scan(&r.TaskID, &r.DatasetID, &r.DatasetName, &r.SourceRowPK, &r.Round, &r.CreatedAt, &r.ReviewStatus); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // CreateTasks 批量为某数据集生成 PENDING 任务（供 seed / 后续导入使用）。
 func (s *Store) CreateTasks(ctx context.Context, datasetID int64, pks []string) (int64, error) {
 	tag, err := s.pool.Exec(ctx, `

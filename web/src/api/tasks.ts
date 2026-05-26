@@ -1,5 +1,11 @@
 import { api } from './client'
-import type { AnnotationData, DatasetListItem, TaskBundle } from '@/types'
+import type { AnnotationData, DatasetListItem, MyTasks, TaskBundle } from '@/types'
+
+// 我的任务：进行中（CLAIMED 给我）+ 已完成（我的有效标注）（B3.8）。
+export async function getMyTasks(): Promise<MyTasks> {
+  const { data } = await api.get<MyTasks>('/me/tasks')
+  return data
+}
 
 export async function listDatasets(): Promise<DatasetListItem[]> {
   const { data } = await api.get<{ items: DatasetListItem[] }>('/datasets')

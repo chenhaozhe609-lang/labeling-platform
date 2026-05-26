@@ -130,6 +130,28 @@ export interface AnnotationHistory {
   superseded: boolean
 }
 
+// ---- 我的任务（B3.8）----
+export interface MyTaskInProgress {
+  task_id: number
+  dataset_id: number
+  dataset_name: string
+  source_row_pk: string
+  lease_expires_at?: string | null
+}
+export interface MyTaskDone {
+  task_id: number
+  dataset_id: number
+  dataset_name: string
+  source_row_pk: string
+  round: number
+  created_at: string
+  review_status?: ReviewStatus | null
+}
+export interface MyTasks {
+  in_progress: MyTaskInProgress[]
+  completed: MyTaskDone[]
+}
+
 // ---- 审核（reviewer 抽检台，C5.1/5.2）----
 export interface ReviewItem {
   annotation_id: number

@@ -35,7 +35,7 @@ export function AnnotationWorkbench() {
   const [values, setValues] = useState<Values>({})
   const [activeFieldCode, setActiveFieldCode] = useState<string | null>(null)
   const [detailsOpen, setDetailsOpen] = useState(false)
-  const [errors, setErrors] = useState<Record<string, boolean>>({})
+  const [errors, setErrors] = useState<Record<string, string>>({})
   const [dirty, setDirty] = useState(false)
   const [restored, setRestored] = useState(false)
   const [ctx, setCtx] = useState<FocusContext>('reading')
@@ -130,7 +130,34 @@ export function AnnotationWorkbench() {
   function setValue(code: string, v: unknown) {
     setValues((p) => ({ ...p, [code]: v }))
     setDirty(true)
-    setErrors((e) => (e[code] ? { ...e, [code]: false } : e))
+    setErrors((e) => (e[code] ? { ...e, [code]: '' } : e)) // 改动即清除该列错误
+  }
+
+  // 单列校验：必填 + text 的 regex + number 的 min/max（B2.10）。
+  function fieldError(col: ColumnSpec, v: unknown): string {
+    if (isEmpty(v)) return '必填'
+    const f = col.field
+    if (!f) return ''
+    if ((f.kind ?? 'text') === 'text' && f.regex) {
+      try {
+        if (!new RegExp(f.regex).test(String(v))) return '格式不符'
+      } catch {
+        /* 非法 regex：跳过 */
+      }
+    }
+    if (f.kind === 'number') {
+      const n = Number(v)
+      if (f.min != null && n < f.min) return `不小于 ${f.min}`
+      if (f.max != null && n > f.max) return `不大于 ${f.max}`
+    }
+    return ''
+  }
+
+  function validateField(code: string) {
+    const col = fillCols.find((c) => c.code === code)
+    if (!col) return
+    const msg = fieldError(col, values[code])
+    setErrors((e) => ({ ...e, [code]: msg }))
   }
 
   function focusField(code: string) {
@@ -147,12 +174,15 @@ export function AnnotationWorkbench() {
   }
 
   function validate(): boolean {
-    const missing: Record<string, boolean> = {}
-    for (const f of fillCols) if (isEmpty(values[f.code])) missing[f.code] = true
-    if (Object.keys(missing).length) {
-      setErrors(missing)
-      toast.error('请补全所有列后再提交')
-      focusField(Object.keys(missing)[0])
+    const errs: Record<string, string> = {}
+    for (const f of fillCols) {
+      const msg = fieldError(f, values[f.code])
+      if (msg) errs[f.code] = msg
+    }
+    if (Object.keys(errs).length) {
+      setErrors(errs)
+      toast.error('请检查标红的列后再提交')
+      focusField(Object.keys(errs)[0])
       return false
     }
     return true
@@ -355,7 +385,7 @@ export function AnnotationWorkbench() {
         </main>
         <aside key={`form-${task!.id}`} className="flex w-[380px] shrink-0 flex-col overflow-y-auto p-4 duration-200 animate-in fade-in slide-in-from-right-2">
           <div className="flex-1">
-            <SchemaForm fields={fillCols} values={values} activeFieldCode={activeFieldCode} errors={errors} aiFills={aiFills} onChange={setValue} onFieldFocus={setActiveFieldCode} />
+            <SchemaForm fields={fillCols} values={values} activeFieldCode={activeFieldCode} errors={errors} aiFills={aiFills} onChange={setValue} onFieldFocus={setActiveFieldCode} onFieldBlur={validateField} />
           </div>
           <div className="sticky bottom-0 mt-4 bg-background pt-2">
             <Button onClick={submit} disabled={submitting} className="w-full bg-success text-primary-foreground hover:bg-success/90">

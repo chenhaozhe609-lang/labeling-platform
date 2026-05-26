@@ -205,6 +205,23 @@ func (h *TaskHandler) Release(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true}) // 幂等：即便已非 CLAIMED 也返回成功
 }
 
+// MyTasks 当前用户的「进行中（CLAIMED）+ 已完成（我的有效标注）」（B3.8）。
+func (h *TaskHandler) MyTasks(c *gin.Context) {
+	ctx := c.Request.Context()
+	uid := userID(c)
+	inProgress, err := h.store.MyInProgress(ctx, uid)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询进行中任务失败"})
+		return
+	}
+	completed, err := h.store.MyCompleted(ctx, uid, 100)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询已完成任务失败"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"in_progress": inProgress, "completed": completed})
+}
+
 func (h *TaskHandler) ListDatasets(c *gin.Context) {
 	items, err := h.store.ListDatasets(c.Request.Context())
 	if err != nil {

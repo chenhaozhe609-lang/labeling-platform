@@ -1,6 +1,7 @@
 import { QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { Toaster } from '@/components/ui/sonner'
+import { SmallScreenGate } from '@/components/SmallScreenGate'
 import { AppShell } from '@/components/AppShell'
 import { AnnotationWorkbench } from '@/features/annotation/AnnotationWorkbench'
 import { ReviewPage } from '@/features/review/ReviewPage'
@@ -11,6 +12,7 @@ import { DatasetDetailPage } from '@/features/dataset/DatasetDetailPage'
 import { SchemaEditorPage } from '@/features/dataset/SchemaEditorPage'
 import { DashboardPage } from '@/features/dashboard/DashboardPage'
 import { UsersPage } from '@/features/admin/UsersPage'
+import { MyTasksPage } from '@/features/me/MyTasksPage'
 import { queryClient } from '@/lib/query'
 import { useAuth } from '@/stores/auth'
 
@@ -61,12 +63,14 @@ function App() {
             <Route path="/datasets/:id/schema" element={<SchemaEditorPage />} />
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/admin/users" element={<UsersPage />} />
+            <Route path="/me/tasks" element={<MyTasksPage />} />
           </Route>
 
           <Route path="/" element={<Navigate to="/datasets" replace />} />
           <Route path="*" element={<Navigate to="/datasets" replace />} />
         </Routes>
         <Toaster position="bottom-right" />
+        <SmallScreenGate />
       </BrowserRouter>
     </QueryClientProvider>
   )

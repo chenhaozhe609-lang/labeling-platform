@@ -164,6 +164,7 @@ func runServer(cfg config.Config) {
 		authed := api.Group("")
 		authed.Use(middleware.RequireAuth(jm))
 		authed.GET("/me", authH.Me)
+		authed.GET("/me/tasks", taskH.MyTasks)
 
 		authed.GET("/datasets", taskH.ListDatasets)
 		authed.GET("/datasets/:id", datasetH.Detail)

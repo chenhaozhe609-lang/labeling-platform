@@ -1,45 +1,24 @@
 import { useState } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { ChevronDown, ClipboardCheck, Database, LayoutDashboard, LogOut, PenLine, Search, Settings2, Users } from 'lucide-react'
+import { ChevronDown, LogOut, Search, Settings2 } from 'lucide-react'
+import { CommandPalette } from './CommandPalette'
+import { NAV, ROLE_LABEL } from './nav'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/stores/auth'
 import { listDatasets } from '@/api/datasets'
 import { TweaksPanel } from './TweaksPanel'
-import type { Role } from '@/types'
-
-interface NavItem {
-  to: string
-  label: string
-  icon: typeof Database
-}
-const NAV: Record<Role, NavItem[]> = {
-  admin: [
-    { to: '/dashboard', label: '总览', icon: LayoutDashboard },
-    { to: '/datasets', label: '数据集', icon: Database },
-    { to: '/review', label: '审核', icon: ClipboardCheck },
-    { to: '/admin/users', label: '用户', icon: Users },
-  ],
-  reviewer: [
-    { to: '/review', label: '审核', icon: ClipboardCheck },
-    { to: '/datasets', label: '数据集', icon: Database },
-  ],
-  annotator: [
-    { to: '/workspace', label: '标注', icon: PenLine },
-    { to: '/datasets', label: '数据集', icon: Database },
-  ],
-}
-const ROLE_LABEL: Record<Role, string> = { admin: '管理员', reviewer: '审核员', annotator: '标注员' }
 
 export function AppShell() {
   const loc = useLocation()
   const user = useAuth((s) => s.user)
   const [tweaks, setTweaks] = useState(false)
+  const [cmdk, setCmdk] = useState(false)
   const nav = NAV[user?.role ?? 'annotator']
 
   return (
     <div className="flex h-svh flex-col bg-background text-foreground">
-      <TopBar onTweaks={() => setTweaks(true)} />
+      <TopBar onTweaks={() => setTweaks(true)} onSearch={() => setCmdk(true)} />
       <div className="flex min-h-0 flex-1">
         <aside className="flex w-[220px] shrink-0 flex-col border-r border-border p-2">
           {nav.map((it) => {
@@ -65,11 +44,12 @@ export function AppShell() {
         </main>
       </div>
       <TweaksPanel open={tweaks} onClose={() => setTweaks(false)} />
+      <CommandPalette open={cmdk} onOpenChange={setCmdk} />
     </div>
   )
 }
 
-function TopBar({ onTweaks }: { onTweaks: () => void }) {
+function TopBar({ onTweaks, onSearch }: { onTweaks: () => void; onSearch: () => void }) {
   const nav = useNavigate()
   const user = useAuth((s) => s.user)
   const logout = useAuth((s) => s.logout)
@@ -83,11 +63,14 @@ function TopBar({ onTweaks }: { onTweaks: () => void }) {
       <div className="mx-1 h-5 w-px bg-border" />
       <ProjectPicker />
 
-      <div className="mx-auto flex w-full max-w-md items-center gap-2 rounded-md border border-border bg-surface-1 px-2.5 py-1.5 text-[13px] text-text-tertiary">
+      <button
+        onClick={onSearch}
+        className="mx-auto flex w-full max-w-md items-center gap-2 rounded-md border border-border bg-surface-1 px-2.5 py-1.5 text-left text-[13px] text-text-tertiary hover:border-primary/40 hover:bg-surface-2"
+      >
         <Search className="size-3.5" />
-        <span className="flex-1">搜索任务 / 数据集…</span>
+        <span className="flex-1">搜索数据集 / 跳转…</span>
         <kbd className="rounded border border-border bg-surface-2 px-1 font-mono text-[10px]">⌘K</kbd>
-      </div>
+      </button>
 
       <span className="rounded-md border border-border px-2 py-1 text-[12px] text-muted-foreground">
         {ROLE_LABEL[user?.role ?? 'annotator']}

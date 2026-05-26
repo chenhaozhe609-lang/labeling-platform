@@ -8,10 +8,11 @@ interface SchemaFormProps {
   fields: ColumnSpec[] // fill 列
   values: Record<string, unknown>
   activeFieldCode: string | null
-  errors: Record<string, boolean>
+  errors: Record<string, string> // code → 错误文案（空串/缺失 = 通过）
   aiFills?: Record<string, unknown>
   onChange: (code: string, value: unknown) => void
   onFieldFocus: (code: string | null) => void
+  onFieldBlur?: (code: string) => void // 失焦内联校验（B2.10）
 }
 
 const isEmpty = (v: unknown) => v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0)
@@ -24,6 +25,7 @@ export function SchemaForm({
   aiFills,
   onChange,
   onFieldFocus,
+  onFieldBlur,
 }: SchemaFormProps) {
   return (
     <div className="rounded-lg border border-border bg-card p-4">
@@ -39,6 +41,7 @@ export function SchemaForm({
               key={f.code}
               data-fieldwrap={f.code}
               onFocus={() => onFieldFocus(f.code)}
+              onBlur={() => onFieldBlur?.(f.code)}
               className={cn(
                 '-mx-2 rounded-md p-2 transition-colors',
                 activeFieldCode === f.code && 'bg-surface-3/40 ring-1 ring-primary/40',
@@ -48,13 +51,13 @@ export function SchemaForm({
                 <span className="font-medium">{f.label || f.code}</span>
                 <span className="text-destructive">*</span>
                 <span className="font-mono text-[11px] text-text-tertiary">{f.type}</span>
-                {fromAI && (
+                {fromAI && !errors[f.code] && (
                   <span className="ml-auto inline-flex items-center gap-1 rounded bg-ai/10 px-1.5 text-[11px] text-ai">
                     <Sparkles className="size-3" />
                     AI
                   </span>
                 )}
-                {errors[f.code] && <span className="ml-auto text-xs text-destructive">必填</span>}
+                {errors[f.code] && <span className="ml-auto text-xs text-destructive">{errors[f.code]}</span>}
               </div>
               <FieldControl field={f} value={v} onChange={(nv) => onChange(f.code, nv)} />
               {f.field?.hint && <div className="mt-1 text-[11px] text-text-tertiary">{f.field.hint}</div>}
@@ -84,6 +87,25 @@ function FieldControl({
 
   switch (kind) {
     case 'single':
+      // 选项过多（>5）改用下拉，避免按钮墙（B2.9 Combobox）。
+      if (opts.length > 5) {
+        return (
+          <select
+            value={(value as string) ?? ''}
+            onChange={(e) => onChange(e.target.value === '' ? null : e.target.value)}
+            className="h-9 w-full rounded-md border border-border bg-surface-1 px-2 text-[13px] outline-none focus:border-primary"
+          >
+            <option value="" disabled>
+              选择…
+            </option>
+            {opts.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        )
+      }
       return (
         <div className="flex flex-wrap gap-1.5">
           {opts.map((o, i) => {
