@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -40,16 +41,28 @@ func (r *Reader) GetRow(ctx context.Context, schema, table, pkCol, pk string) (m
 }
 
 // GetRows 一次取多个 pk 对应行，按 pk 文本（与 source_row_pk 同样的 CAST(... AS text)）键返回。
-// 供审核台一次性拉取整页队列的源行，避免逐条往返 source-db。无匹配的 pk 不出现在结果中。
+// 供审核台/导出一次性批量拉取源行，避免逐条往返 source-db。无匹配的 pk 不出现在结果中。
+//
+// 整数主键走快路径（`pkCol = ANY($1::bigint[])`）以命中主键索引——大表(百万行)批量取行的关键；
+// 否则回退到文本比较（`CAST(pkCol AS text) = ANY(...)`，非整数主键）。两种路径返回的键一致。
 func (r *Reader) GetRows(ctx context.Context, schema, table, pkCol string, pks []string) (map[string]map[string]any, error) {
 	out := make(map[string]map[string]any, len(pks))
 	if len(pks) == 0 {
 		return out, nil
 	}
+	if ints, ok := allInts(pks); ok {
+		q := fmt.Sprintf(`SELECT *, CAST(%s AS text) AS __pk FROM %s.%s WHERE %s = ANY($1::bigint[])`,
+			ident(pkCol), ident(schema), ident(table), ident(pkCol))
+		return r.collectByPK(ctx, q, ints, out)
+	}
 	q := fmt.Sprintf(`SELECT *, CAST(%s AS text) AS __pk FROM %s.%s WHERE CAST(%s AS text) = ANY($1::text[])`,
 		ident(pkCol), ident(schema), ident(table), ident(pkCol))
+	return r.collectByPK(ctx, q, pks, out)
+}
 
-	rows, err := r.pool.Query(ctx, q, pks)
+// collectByPK 执行批量取行查询，按内部 __pk 文本键填充 out。
+func (r *Reader) collectByPK(ctx context.Context, q string, arg any, out map[string]map[string]any) (map[string]map[string]any, error) {
+	rows, err := r.pool.Query(ctx, q, arg)
 	if err != nil {
 		return nil, err
 	}
@@ -64,6 +77,19 @@ func (r *Reader) GetRows(ctx context.Context, schema, table, pkCol string, pks [
 		out[key] = m
 	}
 	return out, nil
+}
+
+// allInts 当所有 pk 都是合法 int64 时返回其切片，供整数主键快路径用。
+func allInts(pks []string) ([]int64, bool) {
+	out := make([]int64, len(pks))
+	for i, s := range pks {
+		n, err := strconv.ParseInt(s, 10, 64)
+		if err != nil {
+			return nil, false
+		}
+		out[i] = n
+	}
+	return out, true
 }
 
 // ident 转义并双引号包裹标识符。
