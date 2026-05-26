@@ -74,7 +74,7 @@ func (s *Store) CountReviewPending(ctx context.Context, datasetID, reviewerID in
 //     重新进入领取池由标注员重做。
 //
 // 返回 ErrConflict（已被审/已废弃/任务非 COMPLETED），ErrForbidden（审本人标注）。
-func (s *Store) SubmitReview(ctx context.Context, annotationID, reviewerID int64, status, note string) error {
+func (s *Store) SubmitReview(ctx context.Context, annotationID, reviewerID int64, status, note string, orgID *int64) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -83,13 +83,15 @@ func (s *Store) SubmitReview(ctx context.Context, annotationID, reviewerID int64
 
 	var authorID, taskID int64
 	var taskStatus string
+	// JOIN datasets + org 过滤：reviewer 只能裁决本组织数据集下的标注（跨组织 annotation_id 视同不存在）。
 	err = tx.QueryRow(ctx, `
 		SELECT a.user_id, a.task_id, t.status
-		FROM annotations a JOIN tasks t ON t.id = a.task_id
+		FROM annotations a JOIN tasks t ON t.id = a.task_id JOIN datasets d ON d.id = a.dataset_id
 		WHERE a.id = $1 AND a.superseded_at IS NULL AND a.reviewed_at IS NULL
-		FOR UPDATE OF a`, annotationID).Scan(&authorID, &taskID, &taskStatus)
+		  AND ($2::bigint IS NULL OR d.org_id = $2)
+		FOR UPDATE OF a`, annotationID, orgID).Scan(&authorID, &taskID, &taskStatus)
 	if err == pgx.ErrNoRows {
-		return ErrConflict // 已被他人审/已废弃/不存在
+		return ErrConflict // 已被他人审/已废弃/不存在/跨组织
 	}
 	if err != nil {
 		return err
@@ -128,7 +130,7 @@ func (s *Store) SubmitReview(ctx context.Context, annotationID, reviewerID int64
 // EditReview 审核改写并通过（B4.4）：reviewer 微调 fills → 原标注 superseded + 标 approved，
 // 新插一条 reviewer 署名、有效、已审通过的修正标注；task 保持 COMPLETED，沿用原 round / form_schema_version。
 // 返回 ErrConflict（已被审/已废弃/任务非 COMPLETED），ErrForbidden（改本人标注）。
-func (s *Store) EditReview(ctx context.Context, annotationID, reviewerID int64, data json.RawMessage, note string) error {
+func (s *Store) EditReview(ctx context.Context, annotationID, reviewerID int64, data json.RawMessage, note string, orgID *int64) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -138,11 +140,13 @@ func (s *Store) EditReview(ctx context.Context, annotationID, reviewerID int64, 
 	var authorID, taskID, datasetID int64
 	var round, fsv int
 	var taskStatus string
+	// JOIN datasets + org 过滤：reviewer 只能改写本组织数据集下的标注（跨组织视同不存在）。
 	err = tx.QueryRow(ctx, `
 		SELECT a.user_id, a.task_id, a.dataset_id, a.round, a.form_schema_version, t.status
-		FROM annotations a JOIN tasks t ON t.id = a.task_id
+		FROM annotations a JOIN tasks t ON t.id = a.task_id JOIN datasets d ON d.id = a.dataset_id
 		WHERE a.id = $1 AND a.superseded_at IS NULL AND a.reviewed_at IS NULL
-		FOR UPDATE OF a`, annotationID).Scan(&authorID, &taskID, &datasetID, &round, &fsv, &taskStatus)
+		  AND ($2::bigint IS NULL OR d.org_id = $2)
+		FOR UPDATE OF a`, annotationID, orgID).Scan(&authorID, &taskID, &datasetID, &round, &fsv, &taskStatus)
 	if err == pgx.ErrNoRows {
 		return ErrConflict
 	}

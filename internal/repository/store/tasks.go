@@ -26,13 +26,14 @@ func scanTask(row pgx.Row) (*domain.Task, error) {
 }
 
 // ClaimTask 用 FOR UPDATE SKIP LOCKED 抢一个 PENDING 任务并置 lease（PRD §11.2）。
-// 池中无可领任务时返回 ErrNoTask。
-func (s *Store) ClaimTask(ctx context.Context, datasetID, userID int64, leaseMin int) (*domain.Task, error) {
+// 池中无可领任务时返回 ErrNoTask。orgID 非 nil 时数据集须属于该组织，否则视同无任务（org 隔离）。
+func (s *Store) ClaimTask(ctx context.Context, datasetID, userID int64, leaseMin int, orgID *int64) (*domain.Task, error) {
 	row := s.pool.QueryRow(ctx, `
 		WITH next AS (
 			SELECT id FROM tasks
 			WHERE dataset_id = $1 AND status = 'PENDING'
-			  AND EXISTS (SELECT 1 FROM datasets d WHERE d.id = $1 AND d.status = 'READY') -- 暂停/未就绪不放任务
+			  AND EXISTS (SELECT 1 FROM datasets d WHERE d.id = $1 AND d.status = 'READY'
+			              AND ($4::bigint IS NULL OR d.org_id = $4)) -- 暂停/未就绪/跨组织不放任务
 			ORDER BY id
 			LIMIT 1
 			FOR UPDATE SKIP LOCKED
@@ -44,7 +45,7 @@ func (s *Store) ClaimTask(ctx context.Context, datasetID, userID int64, leaseMin
 		WHERE t.id = n.id
 		RETURNING t.id, t.dataset_id, t.source_row_pk, t.content_hash, t.status,
 		          t.assigned_to, t.claimed_at, t.lease_expires_at, t.completed_at, t.round`,
-		datasetID, userID, leaseMin)
+		datasetID, userID, leaseMin, orgID)
 
 	t, err := scanTask(row)
 	if err == ErrNotFound {
@@ -53,8 +54,12 @@ func (s *Store) ClaimTask(ctx context.Context, datasetID, userID int64, leaseMin
 	return t, err
 }
 
-func (s *Store) GetTask(ctx context.Context, id int64) (*domain.Task, error) {
-	return scanTask(s.pool.QueryRow(ctx, `SELECT `+taskCols+` FROM tasks WHERE id = $1`, id))
+// GetTask 取任务；orgID 非 nil 时任务所属数据集须属于该组织，否则 ErrNotFound（org 隔离）。
+func (s *Store) GetTask(ctx context.Context, id int64, orgID *int64) (*domain.Task, error) {
+	return scanTask(s.pool.QueryRow(ctx,
+		`SELECT `+taskCols+` FROM tasks t
+		 WHERE t.id = $1 AND ($2::bigint IS NULL
+		       OR EXISTS (SELECT 1 FROM datasets d WHERE d.id = t.dataset_id AND d.org_id = $2))`, id, orgID))
 }
 
 // Heartbeat 续约，返回新的 lease 到期时间。任务非本人 CLAIMED 时返回 ErrConflict。

@@ -28,7 +28,7 @@ func TestConcurrentClaim_NoDuplicates(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for {
-				tk, err := testStore.ClaimTask(ctx, dsID, uid, 30)
+				tk, err := testStore.ClaimTask(ctx, dsID, uid, 30, nil)
 				if errors.Is(err, store.ErrNoTask) {
 					return
 				}

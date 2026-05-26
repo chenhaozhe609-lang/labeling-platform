@@ -45,7 +45,8 @@ func (h *ExportHandler) Export(c *gin.Context) {
 	onlyApproved := c.Query("only_approved") == "true"
 
 	ctx := c.Request.Context()
-	ds, err := h.store.GetDataset(ctx, id)
+	// GetDataset 带 org：跨组织数据集视同不存在，StreamExport 据此天然隔离。
+	ds, err := h.store.GetDataset(ctx, id, ctxOrg(c))
 	if errors.Is(err, store.ErrNotFound) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "数据集不存在"})
 		return

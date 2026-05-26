@@ -24,22 +24,28 @@ type DashboardData struct {
 	Claimed        int           `json:"claimed"`
 	Completed      int           `json:"completed"`
 	Approved       int           `json:"approved"`   // 审核通过的标注数（累计）
-	NeedsRedo      int           `json:"needs_redo"`  // 被审核打回的标注数（累计）；非 task 状态
+	NeedsRedo      int           `json:"needs_redo"` // 被审核打回的标注数（累计）；非 task 状态
 	TodaySubmitted int           `json:"today_submitted"`
 	ActiveToday    int           `json:"active_today"`
 	Leaderboard    []LeaderRow   `json:"leaderboard"`
 	Activity       []ActivityRow `json:"activity"`
 }
 
-// GetDashboard 从 meta-db 聚合全局看板数据。
-func (s *Store) GetDashboard(ctx context.Context) (*DashboardData, error) {
+// GetDashboard 聚合看板数据，按组织隔离：orgID 非 nil 时仅统计该组织数据集下的任务/标注；
+// orgID 为 nil（超管）统计全局。所有涉及 tasks/annotations 的查询都 JOIN datasets 过滤 org。
+func (s *Store) GetDashboard(ctx context.Context, orgID *int64) (*DashboardData, error) {
 	d := &DashboardData{Leaderboard: []LeaderRow{}, Activity: []ActivityRow{}}
 
-	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM datasets`).Scan(&d.Datasets); err != nil {
+	if err := s.pool.QueryRow(ctx,
+		`SELECT count(*) FROM datasets WHERE ($1::bigint IS NULL OR org_id = $1)`, orgID).Scan(&d.Datasets); err != nil {
 		return nil, err
 	}
 
-	rows, err := s.pool.Query(ctx, `SELECT status, count(*) FROM tasks GROUP BY status`)
+	rows, err := s.pool.Query(ctx, `
+		SELECT t.status, count(*)
+		FROM tasks t JOIN datasets d ON d.id = t.dataset_id
+		WHERE ($1::bigint IS NULL OR d.org_id = $1)
+		GROUP BY t.status`, orgID)
 	if err != nil {
 		return nil, err
 	}
@@ -65,23 +71,25 @@ func (s *Store) GetDashboard(ctx context.Context) (*DashboardData, error) {
 		return nil, err
 	}
 
-	_ = s.pool.QueryRow(ctx,
-		`SELECT count(*) FROM annotations WHERE created_at >= current_date`).Scan(&d.TodaySubmitted)
-	_ = s.pool.QueryRow(ctx,
-		`SELECT count(DISTINCT user_id) FROM annotations WHERE created_at >= current_date`).Scan(&d.ActiveToday)
+	_ = s.pool.QueryRow(ctx, `
+		SELECT count(*), count(DISTINCT a.user_id)
+		FROM annotations a JOIN datasets d ON d.id = a.dataset_id
+		WHERE a.created_at >= current_date AND ($1::bigint IS NULL OR d.org_id = $1)`,
+		orgID).Scan(&d.TodaySubmitted, &d.ActiveToday)
 
 	// 审核情况（累计）：approved / needs_redo 来自 annotations.review_status，而非 task 状态。
 	_ = s.pool.QueryRow(ctx, `
-		SELECT count(*) FILTER (WHERE review_status = 'approved'),
-		       count(*) FILTER (WHERE review_status = 'needs_redo')
-		FROM annotations`).Scan(&d.Approved, &d.NeedsRedo)
+		SELECT count(*) FILTER (WHERE a.review_status = 'approved'),
+		       count(*) FILTER (WHERE a.review_status = 'needs_redo')
+		FROM annotations a JOIN datasets d ON d.id = a.dataset_id
+		WHERE ($1::bigint IS NULL OR d.org_id = $1)`, orgID).Scan(&d.Approved, &d.NeedsRedo)
 
 	lb, err := s.pool.Query(ctx, `
 		SELECT a.user_id, u.username, count(*) AS n
-		FROM annotations a JOIN users u ON u.id = a.user_id
-		WHERE a.superseded_at IS NULL
+		FROM annotations a JOIN users u ON u.id = a.user_id JOIN datasets d ON d.id = a.dataset_id
+		WHERE a.superseded_at IS NULL AND ($1::bigint IS NULL OR d.org_id = $1)
 		GROUP BY a.user_id, u.username
-		ORDER BY n DESC LIMIT 8`)
+		ORDER BY n DESC LIMIT 8`, orgID)
 	if err == nil {
 		for lb.Next() {
 			var r LeaderRow
@@ -94,8 +102,9 @@ func (s *Store) GetDashboard(ctx context.Context) (*DashboardData, error) {
 
 	act, err := s.pool.Query(ctx, `
 		SELECT u.username, a.task_id, a.dataset_id, a.created_at
-		FROM annotations a JOIN users u ON u.id = a.user_id
-		ORDER BY a.created_at DESC LIMIT 10`)
+		FROM annotations a JOIN users u ON u.id = a.user_id JOIN datasets d ON d.id = a.dataset_id
+		WHERE ($1::bigint IS NULL OR d.org_id = $1)
+		ORDER BY a.created_at DESC LIMIT 10`, orgID)
 	if err == nil {
 		for act.Next() {
 			var r ActivityRow

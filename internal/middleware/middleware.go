@@ -17,8 +17,10 @@ import (
 
 // Gin context 键。
 const (
-	CtxUserID = "uid"
-	CtxRole   = "role"
+	CtxUserID       = "uid"
+	CtxRole         = "role"
+	CtxOrgID        = "org_id"        // *int64：业务用户的组织；超管为 nil
+	CtxIsSuperadmin = "is_superadmin" // bool：平台超管（org_id 为空）
 )
 
 // Logger 用 slog 输出结构化访问日志。
@@ -103,6 +105,9 @@ func RequireAuth(jm *jwt.Manager) gin.HandlerFunc {
 		}
 		c.Set(CtxUserID, claims.UserID)
 		c.Set(CtxRole, claims.Role)
+		c.Set(CtxOrgID, claims.OrgID)
+		// 不变量（DB CHECK users_org_or_super）：org_id 为空 ⟺ 平台超管。
+		c.Set(CtxIsSuperadmin, claims.OrgID == nil)
 		c.Next()
 	}
 }
@@ -122,4 +127,29 @@ func RequireRole(roles ...domain.Role) gin.HandlerFunc {
 		}
 		c.Next()
 	}
+}
+
+// RequireSuperadmin 仅放行平台超管（需在 RequireAuth 之后），供 /platform/* 端点。
+func RequireSuperadmin() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !IsSuperadmin(c) {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+			return
+		}
+		c.Next()
+	}
+}
+
+// OrgID 取当前请求的组织 id（超管为 nil）。handler 传给 store 做 org 过滤。
+func OrgID(c *gin.Context) *int64 {
+	v, _ := c.Get(CtxOrgID)
+	id, _ := v.(*int64)
+	return id
+}
+
+// IsSuperadmin 当前请求是否平台超管。
+func IsSuperadmin(c *gin.Context) bool {
+	v, _ := c.Get(CtxIsSuperadmin)
+	ok, _ := v.(bool)
+	return ok
 }

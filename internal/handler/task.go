@@ -34,9 +34,12 @@ func userID(c *gin.Context) int64 {
 	return id
 }
 
-// bundle 组装 task + source_row + form_schema（GET/claim 复用）。
-func (h *TaskHandler) bundle(ctx context.Context, t *domain.Task) (gin.H, error) {
-	ds, err := h.store.GetDataset(ctx, t.DatasetID)
+// ctxOrg 取当前请求的组织（超管为 nil，store 据此旁路 org 过滤）。
+func ctxOrg(c *gin.Context) *int64 { return middleware.OrgID(c) }
+
+// bundle 组装 task + source_row + form_schema（GET/claim 复用）。orgID 用于数据集 org 隔离。
+func (h *TaskHandler) bundle(ctx context.Context, t *domain.Task, orgID *int64) (gin.H, error) {
+	ds, err := h.store.GetDataset(ctx, t.DatasetID, orgID)
 	if err != nil {
 		return nil, err
 	}
@@ -67,10 +70,11 @@ func (h *TaskHandler) Claim(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "dataset_id 必填"})
 		return
 	}
-	t, err := h.store.ClaimTask(c.Request.Context(), req.DatasetID, userID(c), h.leaseMin)
+	org := ctxOrg(c)
+	t, err := h.store.ClaimTask(c.Request.Context(), req.DatasetID, userID(c), h.leaseMin, org)
 	if errors.Is(err, store.ErrNoTask) {
-		// 区分「暂停」与「真没任务」：暂停时给前端明确标志。
-		if ds, e := h.store.GetDataset(c.Request.Context(), req.DatasetID); e == nil && ds.Status == domain.StatusPaused {
+		// 区分「暂停」与「真没任务」：暂停时给前端明确标志（GetDataset 带 org，跨组织视同不存在）。
+		if ds, e := h.store.GetDataset(c.Request.Context(), req.DatasetID, org); e == nil && ds.Status == domain.StatusPaused {
 			c.JSON(http.StatusOK, gin.H{"task": nil, "paused": true})
 			return
 		}
@@ -82,7 +86,7 @@ func (h *TaskHandler) Claim(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "claim 失败"})
 		return
 	}
-	b, err := h.bundle(c.Request.Context(), t)
+	b, err := h.bundle(c.Request.Context(), t, org)
 	if err != nil {
 		slog.Error("组装任务失败", "task", t.ID, "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "组装任务失败"})
@@ -97,7 +101,7 @@ func (h *TaskHandler) Get(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "非法 id"})
 		return
 	}
-	t, err := h.store.GetTask(c.Request.Context(), id)
+	t, err := h.store.GetTask(c.Request.Context(), id, ctxOrg(c))
 	if errors.Is(err, store.ErrNotFound) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "任务不存在"})
 		return
@@ -106,7 +110,7 @@ func (h *TaskHandler) Get(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询失败"})
 		return
 	}
-	b, err := h.bundle(c.Request.Context(), t)
+	b, err := h.bundle(c.Request.Context(), t, ctxOrg(c))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "组装任务失败"})
 		return
@@ -138,7 +142,7 @@ func (h *TaskHandler) Submit(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "data 必填"})
 		return
 	}
-	if msg := h.validateFills(c.Request.Context(), id, req.Data); msg != "" {
+	if msg := h.validateFills(c.Request.Context(), id, req.Data, ctxOrg(c)); msg != "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": msg})
 		return
 	}
@@ -155,18 +159,18 @@ func (h *TaskHandler) Submit(c *gin.Context) {
 }
 
 // validateFills 校验提交的 data.fills 覆盖了所有 fill 列且非空；返回错误文案（""=通过）。
-func (h *TaskHandler) validateFills(ctx context.Context, taskID int64, data json.RawMessage) string {
+func (h *TaskHandler) validateFills(ctx context.Context, taskID int64, data json.RawMessage, orgID *int64) string {
 	var payload struct {
 		Fills map[string]any `json:"fills"`
 	}
 	if err := json.Unmarshal(data, &payload); err != nil {
 		return "data.fills 格式错误"
 	}
-	t, err := h.store.GetTask(ctx, taskID)
+	t, err := h.store.GetTask(ctx, taskID, orgID)
 	if err != nil {
 		return "" // 任务查不到：交给后续幂等校验处理
 	}
-	ds, err := h.store.GetDataset(ctx, t.DatasetID)
+	ds, err := h.store.GetDataset(ctx, t.DatasetID, orgID)
 	if err != nil {
 		return ""
 	}
@@ -223,7 +227,7 @@ func (h *TaskHandler) MyTasks(c *gin.Context) {
 }
 
 func (h *TaskHandler) ListDatasets(c *gin.Context) {
-	items, err := h.store.ListDatasets(c.Request.Context())
+	items, err := h.store.ListDatasets(c.Request.Context(), middleware.OrgID(c))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询失败"})
 		return

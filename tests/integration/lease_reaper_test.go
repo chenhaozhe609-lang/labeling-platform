@@ -14,7 +14,7 @@ func TestReaper_ReclaimsExpiredLease(t *testing.T) {
 	ctx := context.Background()
 	uid, dsID := seed(t, 2)
 
-	tk, err := testStore.ClaimTask(ctx, dsID, uid, 30)
+	tk, err := testStore.ClaimTask(ctx, dsID, uid, 30, nil)
 	if err != nil {
 		t.Fatalf("claim: %v", err)
 	}
@@ -33,7 +33,7 @@ func TestReaper_ReclaimsExpiredLease(t *testing.T) {
 		t.Fatalf("回收数=%d，期望 >=1", n)
 	}
 
-	got, err := testStore.GetTask(ctx, tk.ID)
+	got, err := testStore.GetTask(ctx, tk.ID, nil)
 	if err != nil {
 		t.Fatalf("get task: %v", err)
 	}
@@ -52,14 +52,14 @@ func TestReaper_ReclaimsExpiredLease(t *testing.T) {
 func TestReaper_KeepsActiveLease(t *testing.T) {
 	ctx := context.Background()
 	uid, dsID := seed(t, 1)
-	tk, err := testStore.ClaimTask(ctx, dsID, uid, 30)
+	tk, err := testStore.ClaimTask(ctx, dsID, uid, 30, nil)
 	if err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 	if _, err := testStore.ReapExpiredLeases(ctx); err != nil {
 		t.Fatalf("reap: %v", err)
 	}
-	got, _ := testStore.GetTask(ctx, tk.ID)
+	got, _ := testStore.GetTask(ctx, tk.ID, nil)
 	if got.Status != domain.TaskClaimed {
 		t.Errorf("活跃任务被误回收，status=%s", got.Status)
 	}

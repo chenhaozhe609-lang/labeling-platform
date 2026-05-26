@@ -97,8 +97,15 @@ func seed(t *testing.T, nTasks int) (userID, datasetID int64) {
 
 func newUser(t *testing.T) int64 {
 	t.Helper()
-	name := fmt.Sprintf("u%d", userSeq.Add(1))
-	u, err := testStore.CreateUser(context.Background(), name, "x", domain.RoleAnnotator)
+	n := userSeq.Add(1)
+	org := int64(1) // 默认组织（migration 002 回填）
+	u, err := testStore.CreateUser(context.Background(), store.NewUser{
+		Username:     fmt.Sprintf("u%d", n),
+		Email:        fmt.Sprintf("u%d@t.local", n),
+		PasswordHash: "x",
+		Role:         domain.RoleAnnotator,
+		OrgID:        &org,
+	})
 	if err != nil {
 		t.Fatalf("create user: %v", err)
 	}

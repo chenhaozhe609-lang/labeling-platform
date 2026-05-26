@@ -17,6 +17,7 @@ const (
 
 type Dataset struct {
 	ID                int64           `json:"id"`
+	OrgID             *int64          `json:"org_id,omitempty"` // 归属组织；跨组织隔离
 	Name              string          `json:"name"`
 	SourceSchema      string          `json:"source_schema"`
 	SourceTable       string          `json:"source_table"`

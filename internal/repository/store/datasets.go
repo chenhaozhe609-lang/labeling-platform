@@ -6,22 +6,25 @@ import (
 	"github.com/chenhaozhe609-lang/labeling-platform/internal/domain"
 )
 
-func (s *Store) GetDataset(ctx context.Context, id int64) (*domain.Dataset, error) {
+// GetDataset 取数据集，并按 org 隔离——这是数据集相关操作的统一越权护栏：
+// orgID 非 nil 时，跨组织的数据集返回 ErrNotFound（不暴露存在）；orgID 为 nil（超管）旁路过滤。
+func (s *Store) GetDataset(ctx context.Context, id int64, orgID *int64) (*domain.Dataset, error) {
 	row := s.pool.QueryRow(ctx, `
 		SELECT id, name, source_schema, source_table, source_pk_column, hash_columns,
-		       form_schema, form_schema_version, status, total_rows, created_by, created_at
-		FROM datasets WHERE id = $1`, id)
+		       form_schema, form_schema_version, status, total_rows, created_by, org_id, created_at
+		FROM datasets WHERE id = $1 AND ($2::bigint IS NULL OR org_id = $2)`, id, orgID)
 
 	var d domain.Dataset
 	err := row.Scan(&d.ID, &d.Name, &d.SourceSchema, &d.SourceTable, &d.SourcePKColumn, &d.HashColumns,
-		&d.FormSchema, &d.FormSchemaVersion, &d.Status, &d.TotalRows, &d.CreatedBy, &d.CreatedAt)
+		&d.FormSchema, &d.FormSchemaVersion, &d.Status, &d.TotalRows, &d.CreatedBy, &d.OrgID, &d.CreatedAt)
 	if err != nil {
 		return nil, mapNoRows(err)
 	}
 	return &d, nil
 }
 
-func (s *Store) ListDatasets(ctx context.Context) ([]domain.DatasetListItem, error) {
+// ListDatasets 列出组织内数据集（含进度计数）。orgID 为 nil（超管）时跨组织返回全部。
+func (s *Store) ListDatasets(ctx context.Context, orgID *int64) ([]domain.DatasetListItem, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT d.id, d.name, d.status, d.total_rows, d.form_schema_version,
 		       COUNT(t.id) FILTER (WHERE t.status = 'COMPLETED') AS completed,
@@ -29,8 +32,9 @@ func (s *Store) ListDatasets(ctx context.Context) ([]domain.DatasetListItem, err
 		       COUNT(t.id) FILTER (WHERE t.status = 'CLAIMED')   AS claimed
 		FROM datasets d
 		LEFT JOIN tasks t ON t.dataset_id = d.id
+		WHERE ($1::bigint IS NULL OR d.org_id = $1)
 		GROUP BY d.id
-		ORDER BY d.created_at DESC`)
+		ORDER BY d.created_at DESC`, orgID)
 	if err != nil {
 		return nil, err
 	}
@@ -79,9 +83,9 @@ func (s *Store) CreateDataset(ctx context.Context, d *domain.Dataset) (int64, er
 	var id int64
 	err := s.pool.QueryRow(ctx, `
 		INSERT INTO datasets (name, source_schema, source_table, source_pk_column,
-		                      form_schema, form_schema_version, status, total_rows, created_by)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+		                      form_schema, form_schema_version, status, total_rows, created_by, org_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
 		d.Name, d.SourceSchema, d.SourceTable, d.SourcePKColumn,
-		d.FormSchema, d.FormSchemaVersion, d.Status, d.TotalRows, d.CreatedBy).Scan(&id)
+		d.FormSchema, d.FormSchemaVersion, d.Status, d.TotalRows, d.CreatedBy, d.OrgID).Scan(&id)
 	return id, err
 }

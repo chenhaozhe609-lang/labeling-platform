@@ -9,9 +9,11 @@ import (
 	"github.com/chenhaozhe609-lang/labeling-platform/internal/domain"
 )
 
-// ListUsers 全部用户（按 id 升序），供 admin 用户管理页。
-func (s *Store) ListUsers(ctx context.Context) ([]domain.User, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+userCols+` FROM users ORDER BY id`)
+// ListUsers 组织内全部用户（按 id 升序），供 admin 用户管理页。
+// orgID 为 nil（超管）时返回全部用户。
+func (s *Store) ListUsers(ctx context.Context, orgID *int64) ([]domain.User, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT `+userCols+` FROM users WHERE ($1::bigint IS NULL OR org_id = $1) ORDER BY id`, orgID)
 	if err != nil {
 		return nil, err
 	}
@@ -28,10 +30,12 @@ func (s *Store) ListUsers(ctx context.Context) ([]domain.User, error) {
 	return out, rows.Err()
 }
 
-// CountAdmins 当前 admin 数量（用于「保留至少一个 admin」守卫）。
-func (s *Store) CountAdmins(ctx context.Context) (int, error) {
+// CountAdmins 组织内 admin 数量（用于「保留至少一个 admin」守卫）。
+// orgID 为 nil（超管）时统计全局。
+func (s *Store) CountAdmins(ctx context.Context, orgID *int64) (int, error) {
 	var n int
-	err := s.pool.QueryRow(ctx, `SELECT count(*) FROM users WHERE role = 'admin'`).Scan(&n)
+	err := s.pool.QueryRow(ctx,
+		`SELECT count(*) FROM users WHERE role = 'admin' AND ($1::bigint IS NULL OR org_id = $1)`, orgID).Scan(&n)
 	return n, err
 }
 
@@ -47,9 +51,25 @@ func (s *Store) UpdateUserRole(ctx context.Context, id int64, role domain.Role) 
 	return nil
 }
 
-// UpdateUserPassword 重置密码（传入已 bcrypt 的 hash）。
+// UpdateUserPassword 重置密码（传入已 bcrypt 的 hash），同时 bump token_version——
+// 改密即吊销该用户所有旧会话（旧 refresh 失效，旧 access 至多再活一个 TTL）。
 func (s *Store) UpdateUserPassword(ctx context.Context, id int64, passwordHash string) error {
-	tag, err := s.pool.Exec(ctx, `UPDATE users SET password_hash = $2, updated_at = now() WHERE id = $1`, id, passwordHash)
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE users SET password_hash = $2, token_version = token_version + 1, updated_at = now() WHERE id = $1`,
+		id, passwordHash)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// BumpTokenVersion +1 token_version，吊销该用户所有已签发 token（logout-all / 停用）。
+func (s *Store) BumpTokenVersion(ctx context.Context, id int64) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE users SET token_version = token_version + 1, updated_at = now() WHERE id = $1`, id)
 	if err != nil {
 		return err
 	}

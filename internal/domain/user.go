@@ -23,9 +23,13 @@ func (r Role) Valid() bool {
 
 type User struct {
 	ID           int64     `json:"id"`
-	Username     string    `json:"username"`
+	Username     string    `json:"username"` // 显示名，不再全局唯一
+	Email        string    `json:"email"`    // 登录标识，全局唯一（超管亦用邮箱登录）
 	PasswordHash string    `json:"-"`
 	Role         Role      `json:"role"`
+	OrgID        *int64    `json:"org_id,omitempty"` // 业务用户必填；超管为 NULL
+	TokenVersion int       `json:"-"`                // 吊销计数：+1 使旧 token 失效，不外泄
+	IsSuperadmin bool      `json:"is_superadmin"`    // 平台超管（跨组织）
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }

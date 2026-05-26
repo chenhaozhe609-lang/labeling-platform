@@ -2,10 +2,11 @@
 //
 // 用法：
 //
-//	server                                 启动 HTTP 服务
-//	server migrate up|down                 执行/回滚数据库迁移
-//	server createuser <用户名> <密码> <角色>  创建用户（角色：annotator|reviewer|admin）
-//	server seed                            生成 demo 数据（source 表 + dataset + tasks）
+//	server                                      启动 HTTP 服务
+//	server migrate up|down                      执行/回滚数据库迁移
+//	server createuser <用户名> <密码> <角色>       在默认组织(#1)创建用户（角色：annotator|reviewer|admin）
+//	server createsuperadmin <邮箱> <密码>         创建平台超管（跨组织、org_id=NULL）
+//	server seed                                 生成 demo 数据（source 表 + dataset + tasks）
 package main
 
 import (
@@ -16,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -51,6 +53,9 @@ func main() {
 		case "createuser":
 			runCreateUser(cfg)
 			return
+		case "createsuperadmin":
+			runCreateSuperadmin(cfg)
+			return
 		case "seed":
 			runSeed(cfg)
 			return
@@ -67,6 +72,9 @@ func runMigrate(cfg config.Config) {
 	slog.Info("迁移完成", "down", down)
 }
 
+// defaultOrgID 是回填迁移建立的默认组织（migrations/002）。CLI createuser 默认建到此组织。
+const defaultOrgID int64 = 1
+
 func runCreateUser(cfg config.Config) {
 	if len(os.Args) < 5 {
 		fmt.Fprintln(os.Stderr, "用法: server createuser <用户名> <密码> <角色>")
@@ -76,6 +84,9 @@ func runCreateUser(cfg config.Config) {
 	role := domain.Role(os.Args[4])
 	if !role.Valid() {
 		fatal("非法角色（annotator|reviewer|admin）", fmt.Errorf("got %q", role))
+	}
+	if len(password) < 8 {
+		fatal("密码至少 8 位", fmt.Errorf("len=%d", len(password)))
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
@@ -87,11 +98,51 @@ func runCreateUser(cfg config.Config) {
 		fatal("连接数据库失败", err)
 	}
 	defer pool.Close()
-	u, err := store.New(pool).CreateUser(ctx, username, string(hash), role)
+	orgID := defaultOrgID
+	u, err := store.New(pool).CreateUser(ctx, store.NewUser{
+		Username:     username,
+		Email:        strings.ToLower(username) + "@local", // 占位邮箱，对齐回填约定；上线前应改真实邮箱
+		PasswordHash: string(hash),
+		Role:         role,
+		OrgID:        &orgID,
+	})
 	if err != nil {
 		fatal("创建用户失败", err)
 	}
-	fmt.Printf("已创建用户 #%d %s (%s)\n", u.ID, u.Username, u.Role)
+	fmt.Printf("已创建用户 #%d %s <%s> (%s) @org %d\n", u.ID, u.Username, u.Email, u.Role, defaultOrgID)
+}
+
+// runCreateSuperadmin 创建平台超管（org_id=NULL、is_superadmin=true），用邮箱登录。
+func runCreateSuperadmin(cfg config.Config) {
+	if len(os.Args) < 4 {
+		fmt.Fprintln(os.Stderr, "用法: server createsuperadmin <邮箱> <密码>")
+		os.Exit(2)
+	}
+	email, password := os.Args[2], os.Args[3]
+	if len(password) < 8 {
+		fatal("密码至少 8 位", fmt.Errorf("len=%d", len(password)))
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		fatal("密码加密失败", err)
+	}
+	ctx := context.Background()
+	pool, err := db.NewPool(ctx, cfg.DatabaseURL)
+	if err != nil {
+		fatal("连接数据库失败", err)
+	}
+	defer pool.Close()
+	u, err := store.New(pool).CreateUser(ctx, store.NewUser{
+		Username:     email,
+		Email:        email,
+		PasswordHash: string(hash),
+		Role:         domain.RoleAdmin,
+		IsSuperadmin: true, // OrgID 留 nil
+	})
+	if err != nil {
+		fatal("创建超管失败", err)
+	}
+	fmt.Printf("已创建平台超管 #%d <%s>\n", u.ID, u.Email)
 }
 
 func runServer(cfg config.Config) {
@@ -122,7 +173,8 @@ func runServer(cfg config.Config) {
 		Host: cfg.SandboxHost, Port: cfg.SandboxPort,
 		User: cfg.SandboxUser, Password: cfg.SandboxPassword, Timeout: cfg.RestoreTimeout,
 	})
-	authH := handler.NewAuthHandler(st, jm)
+	loginLimiter := middleware.NewLoginLimiter()
+	authH := handler.NewAuthHandler(st, jm, loginLimiter)
 
 	// LLM 预填：配了 key 用真模型（DeepSeek 等 OpenAI 兼容），否则回退占位 stub（PRD §24.5）。
 	var prefiller service.Prefiller = service.StubPrefiller{}
@@ -139,6 +191,8 @@ func runServer(cfg config.Config) {
 	reviewH := handler.NewReviewHandler(st, src)
 	exportH := handler.NewExportHandler(st, src)
 	userH := handler.NewUserHandler(st)
+	inviteH := handler.NewInviteHandler(st, 7*24*time.Hour)
+	platformH := handler.NewPlatformHandler(st)
 
 	rootCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -158,12 +212,15 @@ func runServer(cfg config.Config) {
 	api.Use(middleware.RateLimit(50, 100))
 	{
 		auth := api.Group("/auth")
+		auth.POST("/signup", authH.Signup)
 		auth.POST("/login", authH.Login)
 		auth.POST("/refresh", authH.Refresh)
+		auth.POST("/accept-invite", authH.AcceptInvite)
 
 		authed := api.Group("")
 		authed.Use(middleware.RequireAuth(jm))
 		authed.GET("/me", authH.Me)
+		authed.POST("/auth/logout-all", authH.LogoutAll)
 		authed.GET("/me/tasks", taskH.MyTasks)
 
 		authed.GET("/datasets", taskH.ListDatasets)
@@ -182,6 +239,14 @@ func runServer(cfg config.Config) {
 		adminUsers.POST("", userH.Create)
 		adminUsers.PATCH("/:id", userH.Update)
 		adminUsers.DELETE("/:id", userH.Delete)
+
+		adminInvites := authed.Group("/admin/invites", middleware.RequireRole(domain.RoleAdmin))
+		adminInvites.GET("", inviteH.List)
+		adminInvites.POST("", inviteH.Create)
+		adminInvites.DELETE("/:id", inviteH.Delete)
+
+		platform := authed.Group("/platform", middleware.RequireSuperadmin())
+		platform.GET("/orgs", platformH.ListOrgs)
 
 		tasks := authed.Group("/tasks")
 		tasks.POST("/claim", taskH.Claim)

@@ -9,8 +9,8 @@ import (
 type ExportRow struct {
 	PK           string
 	Round        int
-	Version      int             // 该标注采用的 form_schema 版本
-	ReviewStatus *string         // approved | needs_redo | nil（未审）
+	Version      int     // 该标注采用的 form_schema 版本
+	ReviewStatus *string // approved | needs_redo | nil（未审）
 	Annotator    string
 	Source       *string         // _source: human | ai | ai-edited
 	Fills        json.RawMessage // 标注填入值 {fill列code: value}

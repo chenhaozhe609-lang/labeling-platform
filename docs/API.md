@@ -4,7 +4,10 @@
 错误统一返回 `{"error": "<文案>"}` + 对应 HTTP 状态码。JSON 字段类型以 [`web/src/types.ts`](../web/src/types.ts) 为权威定义。
 
 约定：
-- **角色**：`annotator | reviewer | admin`（JWT 内固定）。下表「角色」列为额外 RBAC 限制；空 = 任意已登录。
+- **角色**：`annotator | reviewer | admin`（组织内角色，JWT 内固定）。下表「角色」列为额外 RBAC 限制；空 = 任意已登录。
+- **多租户**：每个用户归属一个组织（`org_id`）；除超管外，所有业务数据按 `org_id` 严格隔离——`datasets/tasks/reviews/export/dashboard/users` 全面 org 化。跨组织访问数据集/任务一律视同不存在（`404`），跨组织标注裁决/改写视同失效（`409`），claim 他组织数据集视同无任务。**超管**（`is_superadmin`，`org_id=null`）跨组织旁路过滤，仅用 `/platform/*`。
+- **登录标识**：`email`（全局唯一，大小写不敏感）；`username` 为显示名。
+- **会话/吊销**：JWT claims = `{uid, role, org_id, tv, typ}`。`logout-all` / 改密 / 重置密码会 bump `token_version`，使该用户所有旧 token 失效（`refresh` 比对 `tv`；`access` 至多再活一个 TTL）。
 - 时间为 RFC3339 字符串；金额/计数为整数。
 - 分页/流式见各接口说明。
 
@@ -12,12 +15,15 @@
 
 | 方法 | 路径 | 角色 | 请求 | 响应 |
 |---|---|---|---|---|
-| POST | `/auth/login` | — | `{username, password}` | `{access_token, refresh_token, user}` |
-| POST | `/auth/refresh` | — | `{refresh_token}` | `{access_token}` |
-| GET | `/me` | 登录 | — | `User` |
+| POST | `/auth/signup` | — | `{org_name, email, username, password(≥8)}` | `{access_token, refresh_token, user, org}`：建组织 + 注册人即该组织 admin |
+| POST | `/auth/login` | — | `{email, password}` | `{access_token, refresh_token, user}` |
+| POST | `/auth/refresh` | — | `{refresh_token}` | `{access_token, refresh_token}`（校验 `tv`，失效→`401`） |
+| POST | `/auth/accept-invite` | — | `{token, email, username, password(≥8)}` | `{access_token, refresh_token, user}`：凭邀请入既有组织（角色取自邀请） |
+| POST | `/auth/logout-all` | 登录 | — | `{ok:true}`：bump `token_version`，吊销本人所有会话 |
+| GET | `/me` | 登录 | — | `User`（含 `email/org_id/is_superadmin`） |
 | GET | `/me/tasks` | 登录 | — | `{in_progress: MyTaskInProgress[], completed: MyTaskDone[]}`（B3.8） |
 
-错误：登录失败 `401 {"error":"用户名或密码错误"}`；缺/坏 token `401`。
+错误：登录失败 `401 {"error":"邮箱或密码错误"}`；登录失败过多（按 邮箱+IP 计，5 次锁定起、指数退避）`429`；缺/坏 token `401`；注册/接受邀请邮箱已存在 `409`；邀请无效或过期 `400`；邮箱与邀请限定不符 `400`。
 
 ## 数据集
 
@@ -67,11 +73,31 @@
 
 | 方法 | 路径 | 角色 | 请求 | 响应 |
 |---|---|---|---|---|
-| GET | `/admin/dashboard` | admin | — | `Dashboard`（分段进度 + 今日吞吐 + 审核通过/打回 + 排行 + 活动流） |
-| GET | `/admin/users` | admin | — | `{items: User[]}` |
-| POST | `/admin/users` | admin | `{username, password(≥6), role}` | `User`；用户名重复 `409` |
-| PATCH | `/admin/users/:id` | admin | `{role?, password?}` | `{ok:true}`；降末位 admin `409` |
-| DELETE | `/admin/users/:id` | admin | — | `{ok:true}`；删自己 `400`；末位 admin/有关联数据 `409` |
+| GET | `/admin/dashboard` | admin | — | `Dashboard`（**本组织**：分段进度 + 今日吞吐 + 审核通过/打回 + 排行 + 活动流） |
+| GET | `/admin/users` | admin | — | `{items: User[]}`（仅本组织） |
+| POST | `/admin/users` | admin | `{username, email, password(≥8), role}` | `User`（建到本组织）；邮箱重复 `409` |
+| PATCH | `/admin/users/:id` | admin | `{role?, password?(≥8)}` | `{ok:true}`；改密会吊销该用户旧会话；降本组织末位 admin `409`；跨组织用户 `404` |
+| DELETE | `/admin/users/:id` | admin | — | `{ok:true}`；删自己 `400`；本组织末位 admin/有关联数据 `409`；跨组织用户 `404` |
+
+`/admin/users` 仅作用于调用者所在组织（按 `org_id` 隔离）。
+
+## 邀请（admin，按组织限定）
+
+| 方法 | 路径 | 角色 | 请求 | 响应 |
+|---|---|---|---|---|
+| POST | `/admin/invites` | admin | `{role, email?}` | `{invite: Invite, accept_path}`：生成邀请 token，`email` 可限定受邀邮箱 |
+| GET | `/admin/invites` | admin | — | `{items: Invite[]}`（本组织，新到旧） |
+| DELETE | `/admin/invites/:id` | admin | — | `{ok:true}`；撤销本组织邀请；不存在 `404` |
+
+`Invite` 含 `token`，受邀人据 `accept_path`（`/accept-invite?token=…`）打开前端页并 `POST /auth/accept-invite`。邀请默认 7 天有效。
+
+## 平台（超管）
+
+| 方法 | 路径 | 角色 | 请求 | 响应 |
+|---|---|---|---|---|
+| GET | `/platform/orgs` | 超管 | — | `{items: Organization[]}`（跨组织） |
+
+非超管访问 `/platform/*` → `403`。
 
 ## 健康检查
 

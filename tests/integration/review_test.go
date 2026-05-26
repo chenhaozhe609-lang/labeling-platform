@@ -36,7 +36,7 @@ func TestReview_EditAndApprove(t *testing.T) {
 	annID := annIDForTask(t, taskID)
 
 	newData := json.RawMessage(`{"fills":{"x":"corrected"},"_source":"reviewer-edited"}`)
-	if err := testStore.EditReview(ctx, annID, reviewer, newData, "fix typo"); err != nil {
+	if err := testStore.EditReview(ctx, annID, reviewer, newData, "fix typo", nil); err != nil {
 		t.Fatalf("EditReview: %v", err)
 	}
 
@@ -92,7 +92,7 @@ func TestReview_EditSelfForbidden(t *testing.T) {
 	completeWithAnnotation(t, taskID, dsID, author)
 	annID := annIDForTask(t, taskID)
 
-	err := testStore.EditReview(ctx, annID, author, json.RawMessage(`{"fills":{"x":"y"}}`), "")
+	err := testStore.EditReview(ctx, annID, author, json.RawMessage(`{"fills":{"x":"y"}}`), "", nil)
 	if !errors.Is(err, store.ErrForbidden) {
 		t.Errorf("自改 err=%v，期望 ErrForbidden", err)
 	}

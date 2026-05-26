@@ -63,7 +63,8 @@ func (h *DatasetHandler) Upload(c *gin.Context) {
 	ctx := c.Request.Context()
 	uid := userID(c)
 	dsID, err := h.store.CreateDataset(ctx, &domain.Dataset{
-		Name: name, SourceSchema: "", SourceTable: "", SourcePKColumn: "",
+		OrgID: ctxOrg(c), // 归调用者所在组织
+		Name:  name, SourceSchema: "", SourceTable: "", SourcePKColumn: "",
 		FormSchema: json.RawMessage("{}"), FormSchemaVersion: 1, Status: domain.StatusImporting,
 		CreatedBy: &uid,
 	})
@@ -168,7 +169,7 @@ func (h *DatasetHandler) GenerateTasks(c *gin.Context) {
 		return
 	}
 	ctx := c.Request.Context()
-	ds, err := h.store.GetDataset(ctx, id)
+	ds, err := h.store.GetDataset(ctx, id, ctxOrg(c))
 	if errors.Is(err, store.ErrNotFound) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "数据集不存在"})
 		return
@@ -222,7 +223,7 @@ func (h *DatasetHandler) Sync(c *gin.Context) {
 		return
 	}
 	ctx := c.Request.Context()
-	ds, err := h.store.GetDataset(ctx, id)
+	ds, err := h.store.GetDataset(ctx, id, ctxOrg(c))
 	if errors.Is(err, store.ErrNotFound) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "数据集不存在"})
 		return
@@ -339,6 +340,14 @@ func (h *DatasetHandler) toggleStatus(c *gin.Context, pause bool) {
 		return
 	}
 	ctx := c.Request.Context()
+	// 越权护栏：先确认数据集属于本组织，避免跨组织暂停/恢复。
+	if _, err = h.store.GetDataset(ctx, id, ctxOrg(c)); errors.Is(err, store.ErrNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "数据集不存在"})
+		return
+	} else if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询失败"})
+		return
+	}
 	if pause {
 		err = h.store.PauseDataset(ctx, id)
 	} else {
@@ -359,9 +368,9 @@ func (h *DatasetHandler) toggleStatus(c *gin.Context, pause bool) {
 	h.respondDetail(c, id)
 }
 
-// Dashboard 全局看板聚合（admin）。
+// Dashboard 本组织看板聚合（admin）；超管跨组织。
 func (h *DatasetHandler) Dashboard(c *gin.Context) {
-	d, err := h.store.GetDashboard(c.Request.Context())
+	d, err := h.store.GetDashboard(c.Request.Context(), ctxOrg(c))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询看板失败"})
 		return
@@ -380,7 +389,7 @@ func (h *DatasetHandler) Detail(c *gin.Context) {
 
 func (h *DatasetHandler) respondDetail(c *gin.Context, id int64) {
 	ctx := c.Request.Context()
-	ds, err := h.store.GetDataset(ctx, id)
+	ds, err := h.store.GetDataset(ctx, id, ctxOrg(c))
 	if errors.Is(err, store.ErrNotFound) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "数据集不存在"})
 		return
@@ -413,7 +422,16 @@ func (h *DatasetHandler) UpdateFormSchema(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "form_schema 不是合法 JSON"})
 		return
 	}
-	v, err := h.store.UpdateFormSchema(c.Request.Context(), id, json.RawMessage(body))
+	ctx := c.Request.Context()
+	// 越权护栏：先确认数据集属于本组织。
+	if _, err = h.store.GetDataset(ctx, id, ctxOrg(c)); errors.Is(err, store.ErrNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "数据集不存在"})
+		return
+	} else if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询失败"})
+		return
+	}
+	v, err := h.store.UpdateFormSchema(ctx, id, json.RawMessage(body))
 	if errors.Is(err, store.ErrNotFound) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "数据集不存在"})
 		return

@@ -28,7 +28,7 @@ func annotationCount(t *testing.T, taskID int64) int {
 func TestSubmit_Idempotent(t *testing.T) {
 	ctx := context.Background()
 	uid, dsID := seed(t, 1)
-	tk, err := testStore.ClaimTask(ctx, dsID, uid, 30)
+	tk, err := testStore.ClaimTask(ctx, dsID, uid, 30, nil)
 	if err != nil {
 		t.Fatalf("claim: %v", err)
 	}
@@ -43,7 +43,7 @@ func TestSubmit_Idempotent(t *testing.T) {
 		t.Errorf("annotation 数=%d，期望 1（幂等）", c)
 	}
 
-	got, _ := testStore.GetTask(ctx, tk.ID)
+	got, _ := testStore.GetTask(ctx, tk.ID, nil)
 	if got.Status != domain.TaskCompleted {
 		t.Errorf("status=%s，期望 COMPLETED", got.Status)
 	}
@@ -53,7 +53,7 @@ func TestSubmit_Idempotent(t *testing.T) {
 func TestSubmit_OwnershipEnforced(t *testing.T) {
 	ctx := context.Background()
 	uid, dsID := seed(t, 1)
-	tk, err := testStore.ClaimTask(ctx, dsID, uid, 30)
+	tk, err := testStore.ClaimTask(ctx, dsID, uid, 30, nil)
 	if err != nil {
 		t.Fatalf("claim: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestSubmit_OwnershipEnforced(t *testing.T) {
 	if c := annotationCount(t, tk.ID); c != 0 {
 		t.Errorf("越权后 annotation 数=%d，期望 0", c)
 	}
-	got, _ := testStore.GetTask(ctx, tk.ID)
+	got, _ := testStore.GetTask(ctx, tk.ID, nil)
 	if got.Status != domain.TaskClaimed {
 		t.Errorf("越权后 status=%s，期望仍 CLAIMED", got.Status)
 	}
@@ -74,7 +74,7 @@ func TestSubmit_OwnershipEnforced(t *testing.T) {
 func TestSubmit_AfterReleaseConflict(t *testing.T) {
 	ctx := context.Background()
 	uid, dsID := seed(t, 1)
-	tk, err := testStore.ClaimTask(ctx, dsID, uid, 30)
+	tk, err := testStore.ClaimTask(ctx, dsID, uid, 30, nil)
 	if err != nil {
 		t.Fatalf("claim: %v", err)
 	}

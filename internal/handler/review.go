@@ -41,7 +41,8 @@ func (h *ReviewHandler) Queue(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
-	ds, err := h.store.GetDataset(ctx, datasetID)
+	// GetDataset 带 org：跨组织数据集视同不存在，后续 ReviewQueue/Count 据此天然隔离。
+	ds, err := h.store.GetDataset(ctx, datasetID, ctxOrg(c))
 	if errors.Is(err, store.ErrNotFound) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "数据集不存在"})
 		return
@@ -118,7 +119,7 @@ func (h *ReviewHandler) Decision(c *gin.Context) {
 		return
 	}
 
-	err = h.store.SubmitReview(c.Request.Context(), id, userID(c), req.Status, req.Note)
+	err = h.store.SubmitReview(c.Request.Context(), id, userID(c), req.Status, req.Note, ctxOrg(c))
 	if errors.Is(err, store.ErrForbidden) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "不能审核本人提交的标注"})
 		return
@@ -158,7 +159,7 @@ func (h *ReviewHandler) Edit(c *gin.Context) {
 		return
 	}
 
-	err = h.store.EditReview(c.Request.Context(), id, userID(c), req.Data, req.Note)
+	err = h.store.EditReview(c.Request.Context(), id, userID(c), req.Data, req.Note, ctxOrg(c))
 	if errors.Is(err, store.ErrForbidden) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "不能改写本人提交的标注"})
 		return

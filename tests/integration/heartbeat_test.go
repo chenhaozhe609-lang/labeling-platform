@@ -15,7 +15,7 @@ func TestHeartbeat_ExtendsLease(t *testing.T) {
 	ctx := context.Background()
 	uid, dsID := seed(t, 1)
 
-	tk, err := testStore.ClaimTask(ctx, dsID, uid, 1) // 1 分钟租约
+	tk, err := testStore.ClaimTask(ctx, dsID, uid, 1, nil) // 1 分钟租约
 	if err != nil {
 		t.Fatalf("claim: %v", err)
 	}
@@ -35,7 +35,7 @@ func TestHeartbeat_ExtendsLease(t *testing.T) {
 func TestHeartbeat_WrongUserConflict(t *testing.T) {
 	ctx := context.Background()
 	uid, dsID := seed(t, 1)
-	tk, err := testStore.ClaimTask(ctx, dsID, uid, 30)
+	tk, err := testStore.ClaimTask(ctx, dsID, uid, 30, nil)
 	if err != nil {
 		t.Fatalf("claim: %v", err)
 	}

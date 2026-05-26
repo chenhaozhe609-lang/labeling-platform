@@ -83,7 +83,10 @@ func TestExport_Streaming(t *testing.T) {
 	t.Logf("行数 N=%d", n)
 
 	// 用户 + 数据集（源坐标指向下面 bulk 造的源表）
-	u, err := testSt.CreateUser(ctx, "loadu", "x", domain.RoleAnnotator)
+	org := int64(1)
+	u, err := testSt.CreateUser(ctx, store.NewUser{
+		Username: "loadu", Email: "loadu@t.local", PasswordHash: "x", Role: domain.RoleAnnotator, OrgID: &org,
+	})
 	if err != nil {
 		t.Fatalf("create user: %v", err)
 	}

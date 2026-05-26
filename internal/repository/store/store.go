@@ -4,12 +4,22 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/chenhaozhe609-lang/labeling-platform/internal/domain"
 )
+
+// pgxQuerier 抽象 *pgxpool.Pool 与 pgx.Tx 的公共查询接口，
+// 让 insertUser 等既能直接用连接池、也能在事务（signup / accept-invite）内复用。
+type pgxQuerier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}
 
 var (
 	ErrNotFound  = errors.New("not found")
@@ -34,10 +44,12 @@ func New(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool}
 }
 
-const userCols = `id, username, password_hash, role, created_at, updated_at`
+// email 可空（理论上仅超管引导前的占位场景），故 COALESCE 成空串，scanUser 一致按 string 扫。
+const userCols = `id, username, COALESCE(email, '') AS email, password_hash, role, org_id, token_version, is_superadmin, created_at, updated_at`
 
-func (s *Store) GetUserByUsername(ctx context.Context, username string) (*domain.User, error) {
-	row := s.pool.QueryRow(ctx, `SELECT `+userCols+` FROM users WHERE username = $1`, username)
+// GetUserByEmail 按邮箱（大小写不敏感）查用户——登录标识。
+func (s *Store) GetUserByEmail(ctx context.Context, email string) (*domain.User, error) {
+	row := s.pool.QueryRow(ctx, `SELECT `+userCols+` FROM users WHERE lower(email) = lower($1)`, strings.TrimSpace(email))
 	return scanUser(row)
 }
 
@@ -46,12 +58,34 @@ func (s *Store) GetUserByID(ctx context.Context, id int64) (*domain.User, error)
 	return scanUser(row)
 }
 
-func (s *Store) CreateUser(ctx context.Context, username, passwordHash string, role domain.Role) (*domain.User, error) {
-	row := s.pool.QueryRow(ctx,
-		`INSERT INTO users (username, password_hash, role) VALUES ($1, $2, $3) RETURNING `+userCols,
-		username, passwordHash, role)
+// NewUser 是建用户的入参；OrgID 为 nil 且 IsSuperadmin 为 true 即平台超管。
+type NewUser struct {
+	Username     string
+	Email        string
+	PasswordHash string
+	Role         domain.Role
+	OrgID        *int64
+	IsSuperadmin bool
+}
+
+// CreateUser 在连接池上建用户（邮箱冲突 → ErrConflict）。
+func (s *Store) CreateUser(ctx context.Context, p NewUser) (*domain.User, error) {
+	return insertUser(ctx, s.pool, p)
+}
+
+// insertUser 在任意 querier（连接池或事务）上插入用户。email 归一为小写去空格；
+// 空 email 写 NULL（部分唯一索引允许多个 NULL）。
+func insertUser(ctx context.Context, q pgxQuerier, p NewUser) (*domain.User, error) {
+	var email any
+	if e := strings.ToLower(strings.TrimSpace(p.Email)); e != "" {
+		email = e
+	}
+	row := q.QueryRow(ctx,
+		`INSERT INTO users (username, email, password_hash, role, org_id, is_superadmin)
+		 VALUES ($1, $2, $3, $4, $5, $6) RETURNING `+userCols,
+		p.Username, email, p.PasswordHash, p.Role, p.OrgID, p.IsSuperadmin)
 	u, err := scanUser(row)
-	if isPgCode(err, "23505") { // unique_violation：用户名已存在
+	if isPgCode(err, "23505") { // unique_violation：邮箱已存在
 		return nil, ErrConflict
 	}
 	return u, err
@@ -59,7 +93,8 @@ func (s *Store) CreateUser(ctx context.Context, username, passwordHash string, r
 
 func scanUser(row pgx.Row) (*domain.User, error) {
 	var u domain.User
-	err := row.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.CreatedAt, &u.UpdatedAt)
+	err := row.Scan(&u.ID, &u.Username, &u.Email, &u.PasswordHash, &u.Role,
+		&u.OrgID, &u.TokenVersion, &u.IsSuperadmin, &u.CreatedAt, &u.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
