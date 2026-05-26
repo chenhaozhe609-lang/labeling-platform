@@ -205,7 +205,7 @@ func runServer(cfg config.Config) {
 	}
 	r := gin.New()
 	r.MaxMultipartMemory = 16 << 20 // 16MB 内存上限，更大转临时盘
-	r.Use(middleware.Recover(), middleware.Logger(), middleware.CORS(cfg.CORSOrigin))
+	r.Use(middleware.Recover(), middleware.Logger(), middleware.SecurityHeaders(cfg.Env == "prod"), middleware.CORS(cfg.CORSOrigin))
 	r.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 
 	api := r.Group("/api")

@@ -81,6 +81,9 @@ export function SignupPage() {
           </button>
         </div>
 
+        {password.length > 0 && password.length < 8 && (
+          <p className="mb-3 -mt-2 text-[12px] text-text-tertiary">密码至少 8 位（还差 {8 - password.length} 位）</p>
+        )}
         {error && <p className="mb-3 text-[13px] text-destructive">{error}</p>}
 
         <Button type="submit" disabled={loading || !canSubmit} className="w-full">

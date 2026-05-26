@@ -82,10 +82,24 @@ func Load() (Config, error) {
 		if cfg.Env == "prod" {
 			return cfg, fmt.Errorf("JWT_SECRET 在生产环境必填")
 		}
-		cfg.JWTSecret = "dev-insecure-secret-change-me" // 仅开发期
+		cfg.JWTSecret = devJWTSecret // 仅开发期
+	}
+	// 生产环境强制 JWT_SECRET 为强随机值：拒绝开发默认、要求足够长度（HS256 建议 ≥256bit）。
+	if cfg.Env == "prod" {
+		if cfg.JWTSecret == devJWTSecret {
+			return cfg, fmt.Errorf("生产环境禁止使用开发默认 JWT_SECRET，请设置强随机值")
+		}
+		if len(cfg.JWTSecret) < minJWTSecretLen {
+			return cfg, fmt.Errorf("生产环境 JWT_SECRET 至少 %d 字符（建议 `openssl rand -base64 48`）", minJWTSecretLen)
+		}
 	}
 	return cfg, nil
 }
+
+const (
+	devJWTSecret    = "dev-insecure-secret-change-me" // 仅开发期占位
+	minJWTSecretLen = 32                              // 生产最小长度（约 256bit）
+)
 
 // loadDotEnv 极简 .env 加载：KEY=VALUE 逐行，跳过空行/`#` 注释，去除可选包裹引号。
 // 仅设置当前未在环境中的键——真实环境变量优先。文件不存在时静默跳过。

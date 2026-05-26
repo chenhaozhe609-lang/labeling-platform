@@ -66,6 +66,22 @@ func CORS(origin string) gin.HandlerFunc {
 	}
 }
 
+// SecurityHeaders 设置基础安全响应头（防 MIME 嗅探 / 点击劫持 / Referrer 泄漏）。
+// prod 下追加 HSTS——仅在经 HTTPS 暴露时生效，HTTP 下浏览器忽略，故无副作用。
+// 前端静态资源的安全头由 nginx 负责（web/nginx.conf），此处覆盖后端 API 响应（纵深防御）。
+func SecurityHeaders(prod bool) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		h := c.Writer.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Referrer-Policy", "no-referrer")
+		if prod {
+			h.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		}
+		c.Next()
+	}
+}
+
 // RateLimit 按 IP 的令牌桶限流（内存版；多实例/生产建议换 redis）。
 func RateLimit(rps float64, burst int) gin.HandlerFunc {
 	var mu sync.Mutex
