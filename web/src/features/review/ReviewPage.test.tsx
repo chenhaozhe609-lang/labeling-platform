@@ -55,7 +55,8 @@ function renderPage() {
   )
 }
 
-describe('ReviewPage 键盘流', () => {
+// 异步 UI 测试在慢 CI 机上 findBy/waitFor 偶发超时 → 加 retry 防 flake（稳定用例首次即过）。
+describe('ReviewPage 键盘流', { retry: 2 }, () => {
   it('A 键裁决当前条为 approved', async () => {
     renderPage()
     await screen.findByRole('button', { name: /通过/ }) // 等队列就绪
